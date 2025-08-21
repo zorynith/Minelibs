@@ -5,11 +5,13 @@ export default defineConfig({
   title: "Minelibs",
   description: "A Minecraft Version Library",
     head: [
-    ['link', { rel: 'icon', href: '/favicon.ico' }]
+    ['link', { rel: 'icon', href: '/favicon.ico' }],
+    ['link', { rel: 'stylesheet', href: '/custom.css' }]
   ],
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
-    logo: "logo.png",
+    logo: "/Logo.svg",
+    siteTitle: false,
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Examples', link: '/markdown-examples' }
