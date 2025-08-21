@@ -14,18 +14,33 @@ export default defineConfig({
     siteTitle: false,
     nav: [
       { text: 'Home', link: '/' },
-      { text: 'Examples', link: '/markdown-examples' }
+      { text: 'All Versions', link: '/versions/0.1' },
+      { text: 'Bedrock Edition', link: '/docs/bedrock-edition' },
+      { text: 'Java Edition', link: '/docs/java-edition' }
     ],
 
-    sidebar: [
-      {
-        text: 'Examples',
-        items: [
-          { text: 'Bedrock Edition', link: '/markdown-examples' },
-          { text: 'Java Edition', link: '/api-examples' }
-        ]
-      }
-    ],
+    sidebar: {
+      '/docs/': [
+        {
+          text: 'Minecraft Edition',
+          items: [
+            { text: 'Bedrock Edition', link: '/docs/bedrock-edition' },
+            { text: 'Pocket Edition', link: '/docs/pocket-edition' },
+            { text: 'Java Edition', link: '/docs/java-edition' }
+          ]
+        }
+      ],
+      '/versions/': [
+        {
+          text: 'Versions',
+          items: [
+            { text: '0.1', link: '/versions/0.1' },
+            { text: '0.2', link: '/versions/0.2' },
+            { text: '0.3', link: '/versions/0.3' }
+          ]
+        }
+      ]
+    },
 
     socialLinks: [
       { 
