@@ -2,6 +2,7 @@ name: Deploy VitePress site to Pages
 
 on:
   push:
+  workflow_dispatch:
     branches: [master]
 
 # 设置tokenn访问权限
