@@ -1,9 +1,8 @@
-name: Deploy VitePress site to Pages
+name: Deploy Minelibs site
 
 on:
   push:
-    branches: [master]
-  workflow_dispatch:
+    branches: [main]
 
 permissions:
   contents: read
@@ -19,32 +18,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4  # 升级到 v4
+        uses: actions/checkout@v4
         
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3  # 升级到 v3
+        uses: pnpm/action-setup@v3
         with:
           version: 8.6.12
           
       - name: Setup Node
-        uses: actions/setup-node@v4  # 升级到 v4
+        uses: actions/setup-node@v4
         with:
           node-version: 18
           cache: pnpm
           
       - name: Setup Pages
-        uses: actions/configure-pages@v4  # 升级到 v4
+        uses: actions/configure-pages@v4
           
       - name: Install dependencies
         run: pnpm install
         
-      - name: Build with VitePress
+      - name: Build with Minelibs site
         run: |
           pnpm run docs:build
-          touch .vitepress/dist/.nojekyll  # 确保在正确目录创建
+          touch .vitepress/dist/.nojekyll
           
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3  # 升级到 v3
+        uses: actions/upload-pages-artifact@v3
         with:
           path: .vitepress/dist
 
@@ -58,4 +57,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4  # 升级到 v4
+        uses: actions/deploy-pages@v4
