@@ -24,9 +24,7 @@ button::-moz-focus-inner {
   border: 0 !important;
 }
 
-/* 进一步去除按钮点击后的高亮（移动端和Webkit） */
-
-/* 全面去除按钮及可点击元素的点击/聚焦高亮 */
+/* 全面去除 */
 button,
 button:focus,
 button:active,
@@ -72,7 +70,6 @@ a[role="button"]:focus-within,
   background: inherit !important;
 }
 
-/* 对a标签按钮也生效 */
 a, a:focus, a:active {
   outline: none !important;
   box-shadow: none !important;
