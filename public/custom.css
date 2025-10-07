@@ -25,16 +25,51 @@ button::-moz-focus-inner {
 }
 
 /* 进一步去除按钮点击后的高亮（移动端和Webkit） */
-button, button:focus, button:active,
-input[type="button"], input[type="button"]:focus, input[type="button"]:active,
-input[type="submit"], input[type="submit"]:focus, input[type="submit"]:active,
-input[type="reset"], input[type="reset"]:focus, input[type="reset"]:active,
-textarea:focus, [tabindex]:focus {
+
+/* 全面去除按钮及可点击元素的点击/聚焦高亮 */
+button,
+button:focus,
+button:active,
+button:focus-visible,
+button:focus-within,
+input[type="button"],
+input[type="button"]:focus,
+input[type="button"]:active,
+input[type="button"]:focus-visible,
+input[type="button"]:focus-within,
+input[type="submit"],
+input[type="submit"]:focus,
+input[type="submit"]:active,
+input[type="submit"]:focus-visible,
+input[type="submit"]:focus-within,
+input[type="reset"],
+input[type="reset"]:focus,
+input[type="reset"]:active,
+input[type="reset"]:focus-visible,
+input[type="reset"]:focus-within,
+textarea:focus,
+textarea:active,
+textarea:focus-visible,
+textarea:focus-within,
+a[role="button"],
+a[role="button"]:focus,
+a[role="button"]:active,
+a[role="button"]:focus-visible,
+a[role="button"]:focus-within,
+[tabindex]:focus,
+[tabindex]:active,
+[tabindex]:focus-visible,
+[tabindex]:focus-within,
+.btn,
+.btn:focus,
+.btn:active,
+.btn:focus-visible,
+.btn:focus-within {
   outline: none !important;
   box-shadow: none !important;
-  -webkit-tap-highlight-color: transparent !important;
   -webkit-box-shadow: none !important;
-  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  background: inherit !important;
 }
 
 /* 对a标签按钮也生效 */
