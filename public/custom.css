@@ -25,11 +25,16 @@ button::-moz-focus-inner {
 }
 
 /* 进一步去除按钮点击后的高亮（移动端和Webkit） */
-button, button:focus, button:active {
+button, button:focus, button:active,
+input[type="button"], input[type="button"]:focus, input[type="button"]:active,
+input[type="submit"], input[type="submit"]:focus, input[type="submit"]:active,
+input[type="reset"], input[type="reset"]:focus, input[type="reset"]:active,
+textarea:focus, [tabindex]:focus {
+  outline: none !important;
+  box-shadow: none !important;
   -webkit-tap-highlight-color: transparent !important;
-  -webkit-user-select: none;
-  user-select: none;
-  background-color: inherit;
+  -webkit-box-shadow: none !important;
+  box-shadow: none !important;
 }
 
 /* 对a标签按钮也生效 */
