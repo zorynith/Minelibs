@@ -14,3 +14,12 @@
 .scroll-container::-webkit-scrollbar {
     display: none; /* 隐藏滚动条 */
 }
+
+/* 去除蓝色高亮 */
+button, button:focus, button:active, button::-moz-focus-inner {
+  outline: none !important;
+  box-shadow: none !important;
+}
+button::-moz-focus-inner {
+  border: 0 !important;
+}

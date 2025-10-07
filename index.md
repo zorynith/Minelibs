@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "Minelibs"
-  text: "A Minecraft Version Library"
-  tagline: 我的世界版本库
+  text: "A Version Library"
+  tagline: Minecraft
   image:
     src: /mc.svg
     alt: mc
