@@ -23,3 +23,18 @@ button, button:focus, button:active, button::-moz-focus-inner {
 button::-moz-focus-inner {
   border: 0 !important;
 }
+
+/* 进一步去除按钮点击后的高亮（移动端和Webkit） */
+button, button:focus, button:active {
+  -webkit-tap-highlight-color: transparent !important;
+  -webkit-user-select: none;
+  user-select: none;
+  background-color: inherit;
+}
+
+/* 对a标签按钮也生效 */
+a, a:focus, a:active {
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
