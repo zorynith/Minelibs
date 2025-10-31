@@ -142,7 +142,7 @@ class UniversalProxyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         # 匹配字符串中的完整URL
         js_content = re.sub(
             rf'(["\'])(https?:\\?/\\?/{target_domain_escaped}[^"\']*?)(["\'])',
-            lambda m: f'{m.group(1)}{self.rewrite_url(m.group(2).replace("\\", ""), current_path)}{m.group(3)}',
+            lambda m: f'{m.group(1)}{self.rewrite_url(m.group(2).replace("\\\\", ""), current_path)}{m.group(3)}',
             js_content
         )
         
@@ -184,8 +184,8 @@ class UniversalProxyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         # 重写明显的URL模式
         target_domain_escaped = re.escape(self.target_domain)
         text_content = re.sub(
-            rf'https?:\\?/\\?/{target_domain_escaped}[^\s<>"\'\)]*',
-            lambda m: self.rewrite_url(m.group(0).replace("\\", ""), current_path),
+            rf'https?:\\\\?/\\\\?/{target_domain_escaped}[^\s<>"\'\)]*',
+            lambda m: self.rewrite_url(m.group(0).replace("\\\\", ""), current_path),
             text_content
         )
         
