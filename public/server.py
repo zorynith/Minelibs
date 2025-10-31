@@ -140,16 +140,25 @@ class UniversalProxyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         target_domain_escaped = re.escape(self.target_domain)
         
         # 匹配字符串中的完整URL
+        def replace_js_url(match):
+            url_part = match.group(2).replace("\\", "")
+            new_url = self.rewrite_url(url_part, current_path)
+            return f'{match.group(1)}{new_url}{match.group(3)}'
+        
         js_content = re.sub(
             rf'(["\'])(https?:\\?/\\?/{target_domain_escaped}[^"\']*?)(["\'])',
-            lambda m: f'{m.group(1)}{self.rewrite_url(m.group(2).replace("\\\\", ""), current_path)}{m.group(3)}',
+            replace_js_url,
             js_content
         )
         
         # 匹配字符串中的相对路径（以/开头）
+        def replace_js_relative(match):
+            new_url = self.rewrite_url(match.group(2), current_path)
+            return f'{match.group(1)}{new_url}{match.group(3)}'
+        
         js_content = re.sub(
             r'(["\'])(\/[^"\']*?)(["\'])',
-            lambda m: f'{m.group(1)}{self.rewrite_url(m.group(2), current_path)}{m.group(3)}',
+            replace_js_relative,
             js_content
         )
         
@@ -183,9 +192,14 @@ class UniversalProxyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         """重写通用文本内容中的URL"""
         # 重写明显的URL模式
         target_domain_escaped = re.escape(self.target_domain)
+        
+        def replace_text_url(match):
+            url_part = match.group(0).replace("\\", "")
+            return self.rewrite_url(url_part, current_path)
+        
         text_content = re.sub(
-            rf'https?:\\\\?/\\\\?/{target_domain_escaped}[^\s<>"\'\)]*',
-            lambda m: self.rewrite_url(m.group(0).replace("\\\\", ""), current_path),
+            rf'https?:\\?/\\?/{target_domain_escaped}[^\s<>"\'\)]*',
+            replace_text_url,
             text_content
         )
         
