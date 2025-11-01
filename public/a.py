@@ -12,9 +12,13 @@ import io
 import sys
 import os
 import time
+import ssl
 
 class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
-    # 重写send_error方法以支持UTF-8编码
+    def __init__(self, *args, **kwargs):
+        self.current_host = None
+        super().__init__(*args, **kwargs)
+
     def send_error(self, code, message=None, explain=None):
         """重写send_error方法以支持UTF-8编码"""
         try:
@@ -100,6 +104,14 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             if url == 'favicon.ico':
                 self.send_error(404, "Favicon not found")
                 return
+            
+            # 检查是否是相对路径（如百度搜索路径）
+            if not url.startswith(('http://', 'https://')) and self.current_host:
+                # 这是相对路径，需要与当前主机组合
+                full_url = self.current_host + url
+                print(f"相对路径，组合为完整URL: {full_url}")
+                self.proxy_request(full_url)
+                return
                 
             # 检查URL格式并修复
             fixed_url = self.fix_url(url)
@@ -108,6 +120,10 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 return
                 
             print(f"修复后URL: {fixed_url}")
+            
+            # 更新当前主机
+            parsed_url = urllib.parse.urlparse(fixed_url)
+            self.current_host = f"{parsed_url.scheme}://{parsed_url.netloc}"
             
             # 代理请求
             self.proxy_request(fixed_url)
@@ -434,17 +450,41 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 if key_lower not in ['host', 'connection', 'accept-encoding', 'content-length']:
                     headers[key] = value
             
+            # 创建SSL上下文，忽略证书验证
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
             # 创建请求
             req = urllib.request.Request(url, headers=headers)
             
-            # 发送请求
-            with urllib.request.urlopen(req, timeout=30) as response:
+            # 发送请求，忽略SSL证书验证
+            with urllib.request.urlopen(req, timeout=30, context=ssl_context) as response:
                 # 获取响应数据
                 content = response.read()
                 
                 # 处理gzip压缩
                 if response.headers.get('Content-Encoding') == 'gzip':
                     content = gzip.decompress(content)
+                
+                # 修改HTML内容，添加返回首页按钮
+                content_type = response.headers.get('Content-Type', '').lower()
+                if 'text/html' in content_type:
+                    # 在HTML中插入返回首页按钮
+                    home_button = b'''
+                    <div style="position:fixed;top:20px;right:20px;z-index:9999;">
+                        <a href="/" style="padding:10px 20px;background:#007cba;color:white;text-decoration:none;border-radius:5px;font-family:Arial,sans-serif;">返回首页</a>
+                    </div>
+                    '''
+                    # 在body标签后插入按钮
+                    if b'<body' in content:
+                        # 找到body标签的位置
+                        body_pos = content.find(b'<body')
+                        if body_pos != -1:
+                            # 找到body标签结束的位置
+                            body_end_pos = content.find(b'>', body_pos) + 1
+                            # 在body标签后插入按钮
+                            content = content[:body_end_pos] + home_button + content[body_end_pos:]
                 
                 # 发送响应头
                 self.send_response(response.getcode())
@@ -454,6 +494,9 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                     key_lower = key.lower()
                     if key_lower not in ['content-encoding', 'transfer-encoding', 'connection', 'content-length']:
                         self.send_header(key, value)
+                
+                # 更新内容长度
+                self.send_header('Content-Length', str(len(content)))
                 
                 self.end_headers()
                 
@@ -489,7 +532,7 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 def run_proxy_server():
     """运行代理服务器"""
-    # 尝试多个端口
+    # 使用指定的端口范围
     ports = [60000, 61000, 62000, 63000, 64000, 65000]
     
     for port in ports:
