@@ -29,7 +29,6 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Connection', 'close')
             self.end_headers()
             
-            # 添加返回首页按钮的错误页面
             error_content = f"""
             <!DOCTYPE html>
             <html>
@@ -88,48 +87,50 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             if not url:
                 self.show_homepage()
                 return
+            
+            # 解码URL
+            try:
+                url = urllib.parse.unquote(url)
+            except:
+                pass
+            
+            print(f"原始请求URL: {url}")
+            
+            # 处理favicon请求
+            if url == 'favicon.ico':
+                self.send_error(404, "Favicon not found")
+                return
                 
-            # 处理相对URL的情况（如搜索查询）
-            if not url.startswith(('http://', 'https://')):
-                # 如果是搜索查询参数，构造完整的URL
-                if '?' in url or '=' in url:
-                    # 这是一个搜索查询，我们将其重定向到主页进行提示
-                    self.show_search_help(url)
-                    return
-                else:
-                    # 其他情况，尝试添加https://前缀
-                    url = 'https://' + url
+            # 检查URL格式并修复
+            fixed_url = self.fix_url(url)
+            if not fixed_url:
+                self.show_url_help(url)
+                return
+                
+            print(f"修复后URL: {fixed_url}")
             
             # 代理请求
-            self.proxy_request(url)
+            self.proxy_request(fixed_url)
             
         except Exception as e:
             print(f"处理GET请求时出错: {e}")
             self.send_error(500, f"服务器内部错误: {str(e)}")
 
-    def do_POST(self):
-        try:
-            # 获取POST数据
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length) if content_length > 0 else b''
+    def fix_url(self, url):
+        """修复URL格式"""
+        # 如果URL已经是完整的，直接返回
+        if url.startswith(('http://', 'https://')):
+            return url
             
-            # 解析URL
-            url = self.path[1:]
+        # 如果URL包含空格或其他问题，进行清理
+        url = url.strip()
+        
+        # 检查是否包含常见域名特征
+        if '.' in url and not url.startswith(('http://', 'https://')):
+            # 添加https://前缀
+            return 'https://' + url
             
-            if not url:
-                self.send_error(400, "缺少目标URL")
-                return
-                
-            # 处理相对URL的情况
-            if not url.startswith(('http://', 'https://')):
-                url = 'https://' + url
-                
-            # 代理POST请求
-            self.proxy_post_request(url, post_data)
-            
-        except Exception as e:
-            print(f"处理POST请求时出错: {e}")
-            self.send_error(500, f"服务器内部错误: {str(e)}")
+        return None
 
     def show_homepage(self):
         """显示代理服务器主页"""
@@ -251,31 +252,31 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                     <form id="searchForm" onsubmit="return handleSearch()">
                         <div class="search-box">
                             <input type="text" id="url" class="search-input" 
-                                   placeholder="输入完整网址 (例如: https://www.baidu.com)" 
-                                   value="https://">
+                                   placeholder="输入完整网址 (例如: www.baidu.com)" 
+                                   value="">
                             <button type="submit" class="search-button">访问</button>
                         </div>
                     </form>
                     
                     <div class="warning">
-                        <strong>注意:</strong> 请确保输入完整的网址，包含 http:// 或 https://
+                        <strong>注意:</strong> 请直接输入域名，不需要输入 https://，系统会自动添加
                     </div>
                     
                     <div class="quick-links">
                         <strong>快速访问:</strong><br>
-                        <a href="#" onclick="quickVisit('https://www.baidu.com')">百度</a>
-                        <a href="#" onclick="quickVisit('https://www.google.com')">Google</a>
-                        <a href="#" onclick="quickVisit('https://github.com')">GitHub</a>
-                        <a href="#" onclick="quickVisit('https://www.bilibili.com')">B站</a>
-                        <a href="#" onclick="quickVisit('https://www.zhihu.com')">知乎</a>
-                        <a href="#" onclick="quickVisit('https://weibo.com')">微博</a>
+                        <a href="#" onclick="quickVisit('www.baidu.com')">百度</a>
+                        <a href="#" onclick="quickVisit('www.google.com')">Google</a>
+                        <a href="#" onclick="quickVisit('github.com')">GitHub</a>
+                        <a href="#" onclick="quickVisit('www.bilibili.com')">B站</a>
+                        <a href="#" onclick="quickVisit('www.zhihu.com')">知乎</a>
+                        <a href="#" onclick="quickVisit('weibo.com')">微博</a>
                     </div>
                     
                     <div class="info">
                         <strong>使用说明:</strong><br>
-                        1. 在输入框中输入完整的网址（必须包含 https:// 或 http://）<br>
+                        1. 在输入框中输入域名（例如: www.baidu.com）<br>
                         2. 点击"访问"按钮或按回车键<br>
-                        3. 支持大多数网站的代理访问<br>
+                        3. 系统会自动添加 https:// 前缀<br>
                         4. 右上角有固定的"返回首页"按钮，随时可以回到此页面
                     </div>
                 </div>
@@ -288,11 +289,8 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                             return false;
                         }
                         
-                        // 确保URL包含协议
-                        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                            alert('请输入完整的网址，包含 http:// 或 https://');
-                            return false;
-                        }
+                        // 清理URL，移除可能的多余协议
+                        url = url.replace(/^https?:\/\//, '');
                         
                         // 使用代理访问
                         window.location.href = '/' + encodeURIComponent(url);
@@ -325,8 +323,8 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             print(f"显示主页时出错: {e}")
             self.send_error(500, f"显示主页时出错: {str(e)}")
 
-    def show_search_help(self, search_query):
-        """显示搜索帮助页面"""
+    def show_url_help(self, bad_url):
+        """显示URL格式帮助"""
         try:
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -337,7 +335,7 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             <html>
             <head>
                 <meta charset="utf-8">
-                <title>搜索帮助</title>
+                <title>URL格式错误</title>
                 <style>
                     body {{ 
                         font-family: Arial, sans-serif; 
@@ -371,32 +369,40 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                         border-radius: 5px;
                         margin: 20px 0;
                     }}
+                    .fixed-home-button {{
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        padding: 10px 20px;
+                        background: #007cba;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 5px;
+                        z-index: 1000;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                    }}
                 </style>
             </head>
             <body>
+                <a href="/" class="fixed-home-button">🏠 返回首页</a>
+                
                 <div class="container">
-                    <h1>搜索帮助</h1>
+                    <h1>URL格式错误</h1>
                     
                     <div class="warning">
-                        <strong>注意:</strong> 检测到您可能输入了搜索查询而不是完整的网址。
+                        <strong>无法处理您输入的URL:</strong> {bad_url}
                     </div>
                     
-                    <p>您输入的查询: <code>{search_query}</code></p>
-                    
-                    <p>代理服务器需要完整的网址才能工作，例如:</p>
+                    <p>请按照以下格式输入网址：</p>
                     <ul>
-                        <li><code>https://www.baidu.com</code></li>
-                        <li><code>https://www.google.com</code></li>
-                        <li><code>https://github.com</code></li>
+                        <li><code>www.baidu.com</code></li>
+                        <li><code>github.com</code></li>
+                        <li><code>www.bilibili.com</code></li>
                     </ul>
                     
-                    <p>如果您想进行搜索，请:</p>
-                    <ol>
-                        <li>先访问搜索引擎网站（如百度、Google）</li>
-                        <li>然后在搜索框中进行搜索</li>
-                    </ol>
+                    <p>系统会自动为您添加 <code>https://</code> 前缀</p>
                     
-                    <a href="/" class="home-button">返回首页</a>
+                    <a href="/" class="home-button">返回首页重新输入</a>
                 </div>
             </body>
             </html>
@@ -404,30 +410,29 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(help_page.encode('utf-8'))
             
         except Exception as e:
-            print(f"显示搜索帮助时出错: {e}")
-            self.send_error(500, f"显示搜索帮助时出错: {str(e)}")
+            print(f"显示URL帮助时出错: {e}")
+            self.send_error(500, f"显示URL帮助时出错: {str(e)}")
 
     def proxy_request(self, url):
         """代理HTTP请求"""
         try:
-            # 解码URL（可能被编码过）
-            try:
-                url = urllib.parse.unquote(url)
-            except:
-                pass
-                
             print(f"正在代理访问: {url}")
             
             # 设置请求头
-            headers = {}
-            for key, value in self.headers.items():
-                if key.lower() not in ['host', 'connection', 'accept-encoding']:
-                    headers[key] = value
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            }
             
-            # 添加常见的浏览器头
-            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-            headers['Accept-Language'] = 'zh-CN,zh;q=0.9,en;q=0.8'
+            # 添加原始请求头（排除一些不需要的）
+            for key, value in self.headers.items():
+                key_lower = key.lower()
+                if key_lower not in ['host', 'connection', 'accept-encoding', 'content-length']:
+                    headers[key] = value
             
             # 创建请求
             req = urllib.request.Request(url, headers=headers)
@@ -447,16 +452,28 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 # 复制响应头（排除一些不合适的头）
                 for key, value in response.headers.items():
                     key_lower = key.lower()
-                    if key_lower not in ['content-encoding', 'transfer-encoding', 'connection']:
+                    if key_lower not in ['content-encoding', 'transfer-encoding', 'connection', 'content-length']:
                         self.send_header(key, value)
                 
-                # 确保使用UTF-8编码
-                if 'content-type' in response.headers and 'charset' not in response.headers['content-type'].lower():
-                    content_type = response.headers['content-type']
-                    if content_type.startswith('text/'):
-                        self.send_header('Content-Type', content_type + '; charset=utf-8')
+                # 添加返回首页的JavaScript
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
                 
                 self.end_headers()
+                
+                # 在页面底部添加返回首页按钮
+                if b'</body>' in content.lower():
+                    return_button = b'''
+                    <div style="position:fixed;top:20px;right:20px;z-index:9999;">
+                        <a href="/" style="padding:10px 20px;background:#007cba;color:white;text-decoration:none;border-radius:5px;">🏠 返回首页</a>
+                    </div>
+                    <script>
+                        // 添加返回首页按钮
+                        var homeBtn = document.createElement('div');
+                        homeBtn.innerHTML = '<a href="/" style="position:fixed;top:20px;right:20px;padding:10px 20px;background:#007cba;color:white;text-decoration:none;border-radius:5px;z-index:9999;">🏠 返回首页</a>';
+                        document.body.appendChild(homeBtn);
+                    </script>
+                    '''
+                    content = content.replace(b'</body>', return_button + b'</body>')
                 
                 # 发送响应内容
                 self.wfile.write(content)
@@ -474,56 +491,6 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             print(f"代理请求时出错: {e}")
             self.send_error(500, f"代理请求时出错: {str(e)}")
 
-    def proxy_post_request(self, url, post_data):
-        """代理POST请求"""
-        try:
-            # 解码URL
-            try:
-                url = urllib.parse.unquote(url)
-            except:
-                pass
-                
-            print(f"正在代理POST访问: {url}")
-            
-            # 设置请求头
-            headers = {}
-            for key, value in self.headers.items():
-                if key.lower() not in ['host', 'connection', 'content-length']:
-                    headers[key] = value
-            
-            # 添加常见的浏览器头
-            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            
-            # 创建POST请求
-            req = urllib.request.Request(url, data=post_data, headers=headers, method='POST')
-            
-            # 发送请求
-            with urllib.request.urlopen(req, timeout=30) as response:
-                # 获取响应数据
-                content = response.read()
-                
-                # 处理gzip压缩
-                if response.headers.get('Content-Encoding') == 'gzip':
-                    content = gzip.decompress(content)
-                
-                # 发送响应头
-                self.send_response(response.getcode())
-                
-                # 复制响应头
-                for key, value in response.headers.items():
-                    key_lower = key.lower()
-                    if key_lower not in ['content-encoding', 'transfer-encoding', 'connection']:
-                        self.send_header(key, value)
-                
-                self.end_headers()
-                
-                # 发送响应内容
-                self.wfile.write(content)
-                
-        except Exception as e:
-            print(f"代理POST请求时出错: {e}")
-            self.send_error(500, f"代理POST请求时出错: {str(e)}")
-
     def log_message(self, format, *args):
         """重写日志方法，使用UTF-8编码输出"""
         message = format % args
@@ -536,68 +503,62 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     """支持多线程的HTTP服务器"""
     daemon_threads = True
-    allow_reuse_address = True  # 允许地址重用
+    allow_reuse_address = True
 
-def find_available_port(start_port=60000, max_attempts=10):
-    """查找可用的端口"""
-    for port in range(start_port, start_port + max_attempts):
-        try:
-            # 尝试绑定端口
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind(('', port))
-            sock.close()
-            return port
-        except OSError:
-            continue
-    return None
-
-def run_proxy_server(port=60000):
+def run_proxy_server():
     """运行代理服务器"""
-    # 先尝试杀死占用端口的进程
-    try:
-        os.system(f"fuser -k {port}/tcp > /dev/null 2>&1")
-        time.sleep(1)  # 等待端口释放
-    except:
-        pass
+    # 尝试多个端口
+    ports = [8080, 8888, 8000, 3000, 5000, 6000]
     
-    # 查找可用端口
-    available_port = find_available_port(port)
-    
-    if available_port is None:
-        print("❌ 找不到可用端口，请手动关闭占用端口的进程")
-        return
-    
-    try:
-        server = ThreadedHTTPServer(('', available_port), ProxyRequestHandler)
-        print(f"🌐 代理服务器已启动在端口 {available_port}")
-        print(f"📱 请在浏览器中访问: http://localhost:{available_port}")
-        print("⏹️  要停止服务器，请按 Ctrl+C 或输入 exit")
-        
-        # 启动服务器线程
-        server_thread = threading.Thread(target=server.serve_forever)
-        server_thread.daemon = True
-        server_thread.start()
-        
-        # 监听退出命令
-        while True:
+    for port in ports:
+        try:
+            # 清理端口
             try:
-                command = input().strip().lower()
-                if command in ['exit', 'quit', 'stop']:
-                    print("🛑 正在关闭服务器...")
+                os.system(f"fuser -k {port}/tcp > /dev/null 2>&1")
+                time.sleep(1)
+            except:
+                pass
+            
+            server = ThreadedHTTPServer(('', port), ProxyRequestHandler)
+            print(f"🌐 代理服务器已启动在端口 {port}")
+            print(f"📱 请在浏览器中访问: http://localhost:{port}")
+            print("⏹️  要停止服务器，请按 Ctrl+C")
+            
+            # 启动服务器线程
+            server_thread = threading.Thread(target=server.serve_forever)
+            server_thread.daemon = True
+            server_thread.start()
+            
+            print(f"✅ 服务器在端口 {port} 启动成功!")
+            
+            # 监听退出命令
+            while True:
+                try:
+                    command = input().strip().lower()
+                    if command in ['exit', 'quit', 'stop']:
+                        print("🛑 正在关闭服务器...")
+                        server.shutdown()
+                        server.server_close()
+                        return
+                    time.sleep(0.1)
+                except (KeyboardInterrupt, EOFError):
+                    print("\n🛑 正在关闭服务器...")
                     server.shutdown()
                     server.server_close()
-                    break
-                time.sleep(0.1)
-            except (KeyboardInterrupt, EOFError):
-                print("\n🛑 正在关闭服务器...")
-                server.shutdown()
-                server.server_close()
-                break
-                
-    except Exception as e:
-        print(f"❌ 启动服务器时出错: {e}")
+                    return
+                    
+        except OSError as e:
+            if "Address already in use" in str(e):
+                print(f"❌ 端口 {port} 被占用，尝试下一个端口...")
+                continue
+            else:
+                print(f"❌ 端口 {port} 错误: {e}")
+                continue
+        except Exception as e:
+            print(f"❌ 启动服务器时出错: {e}")
+            continue
+    
+    print("❌ 所有端口都不可用，请检查系统状态")
 
 if __name__ == '__main__':
-    # 在Cloud Shell中使用端口60000
-    run_proxy_server(60000)
+    run_proxy_server()
