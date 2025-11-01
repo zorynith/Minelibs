@@ -17,8 +17,9 @@ import select
 
 class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        self.current_host = None
         super().__init__(*args, **kwargs)
+        # 使用类变量来跟踪当前会话
+        self.session_data = {}
 
     def send_error(self, code, message=None, explain=None):
         try:
@@ -33,7 +34,6 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Connection', 'close')
             self.end_headers()
             
-            # 使用纯ASCII字符的错误页面
             error_content = f"""
             <!DOCTYPE html>
             <html>
@@ -85,56 +85,69 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            url = self.path[1:]
+            # 获取URL路径
+            path = self.path
             
-            if not url:
+            # 如果URL为空或是根路径，显示主页
+            if path == '/' or not path:
                 self.show_homepage()
                 return
             
-            try:
-                url = urllib.parse.unquote(url)
-            except:
-                pass
-            
-            print(f"Request URL: {url}")
-            
-            if url == 'favicon.ico':
+            # 处理favicon请求
+            if path == '/favicon.ico':
                 self.send_error(404, "Favicon not found")
                 return
             
-            # 处理相对路径
-            if not url.startswith(('http://', 'https://')) and self.current_host:
-                full_url = self.current_host + url
-                print(f"Relative path, combined to: {full_url}")
-                self.proxy_request(full_url)
+            print(f"Request path: {path}")
+            
+            # 解析URL参数
+            parsed_path = urllib.parse.urlparse(path)
+            query_params = urllib.parse.parse_qs(parsed_path.query)
+            
+            # 检查是否有当前网站的cookie
+            current_site = self.headers.get('Cookie', '').replace('current_site=', '')
+            
+            # 如果是代理路径格式 (/proxy/url)
+            if path.startswith('/proxy/'):
+                url = path[7:]  # 去掉 /proxy/ 前缀
+                url = urllib.parse.unquote(url)
+                print(f"Proxy URL: {url}")
+                self.proxy_request(url, set_cookie=True)
+                return
+            
+            # 如果是直接访问的URL
+            if len(path) > 1 and not path.startswith('/proxy/'):
+                url = path[1:]  # 去掉开头的 /
+                url = urllib.parse.unquote(url)
+                
+                # 检查是否是相对路径（如百度搜索路径）
+                if not url.startswith(('http://', 'https://')):
+                    # 如果有当前网站的cookie，使用它作为基础URL
+                    if current_site:
+                        base_url = current_site
+                        if not base_url.endswith('/') and not url.startswith('/'):
+                            full_url = base_url + '/' + url
+                        else:
+                            full_url = base_url + url
+                        print(f"Relative path, using cookie base: {base_url}")
+                        print(f"Full URL: {full_url}")
+                        self.proxy_request(full_url, set_cookie=False)
+                        return
+                    else:
+                        # 没有基础URL，显示错误
+                        self.show_url_help(url)
+                        return
+                
+                # 完整的URL，直接代理
+                print(f"Full URL request: {url}")
+                self.proxy_request(url, set_cookie=True)
                 return
                 
-            fixed_url = self.fix_url(url)
-            if not fixed_url:
-                self.show_url_help(url)
-                return
-                
-            print(f"Fixed URL: {fixed_url}")
-            
-            parsed_url = urllib.parse.urlparse(fixed_url)
-            self.current_host = f"{parsed_url.scheme}://{parsed_url.netloc}"
-            
-            self.proxy_request(fixed_url)
+            self.send_error(404, "Page not found")
             
         except Exception as e:
             print(f"Error processing GET request: {e}")
             self.send_error(500, f"Server error: {str(e)}")
-
-    def fix_url(self, url):
-        if url.startswith(('http://', 'https://')):
-            return url
-            
-        url = url.strip()
-        
-        if '.' in url and not url.startswith(('http://', 'https://')):
-            return 'https://' + url
-            
-        return None
 
     def show_homepage(self):
         try:
@@ -142,7 +155,6 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
             
-            # 使用纯ASCII字符的主页
             homepage = """
             <!DOCTYPE html>
             <html>
@@ -292,9 +304,11 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                             return false;
                         }
                         
+                        // Remove any existing protocol
                         url = url.replace(/^https?:\\/\\//, '');
                         
-                        window.location.href = '/' + encodeURIComponent(url);
+                        // Use proxy format
+                        window.location.href = '/proxy/https://' + url;
                         return false;
                     }
                     
@@ -391,6 +405,8 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                         <strong>Cannot process your URL:</strong> {bad_url}
                     </div>
                     
+                    <p>This appears to be a relative URL from a website. Please start from the homepage and enter a full domain name.</p>
+                    
                     <p>Please enter URLs in this format:</p>
                     <ul>
                         <li><code>www.baidu.com</code></li>
@@ -411,9 +427,13 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             print(f"Error showing URL help: {e}")
             self.send_error(500, f"Error showing URL help: {str(e)}")
 
-    def proxy_request(self, url):
+    def proxy_request(self, url, set_cookie=False):
         try:
             print(f"Proxying: {url}")
+            
+            # 确保URL是完整的
+            if not url.startswith(('http://', 'https://')):
+                url = 'https://' + url
             
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -424,27 +444,39 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 'Upgrade-Insecure-Requests': '1'
             }
             
+            # 添加原始请求头
             for key, value in self.headers.items():
                 key_lower = key.lower()
-                if key_lower not in ['host', 'connection', 'accept-encoding', 'content-length']:
+                if key_lower not in ['host', 'connection', 'accept-encoding', 'content-length', 'cookie']:
                     headers[key] = value
             
+            # SSL上下文
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
             
+            # 创建请求
             req = urllib.request.Request(url, headers=headers)
             
+            # 发送请求
             with urllib.request.urlopen(req, timeout=30, context=ssl_context) as response:
                 content = response.read()
                 
+                # 处理gzip压缩
                 if response.headers.get('Content-Encoding') == 'gzip':
                     content = gzip.decompress(content)
                 
-                # 在所有HTML页面中插入返回首页按钮
+                # 获取基础URL用于重写相对链接
+                parsed_url = urllib.parse.urlparse(url)
+                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                
+                # 在所有HTML页面中插入返回首页按钮和重写链接
                 content_type = response.headers.get('Content-Type', '').lower()
                 if 'text/html' in content_type:
-                    # 创建返回首页按钮的HTML
+                    # 重写相对链接为绝对链接
+                    content = self.rewrite_links(content, base_url)
+                    
+                    # 插入返回首页按钮
                     home_button = b'''
                     <div style="position:fixed;top:10px;right:10px;z-index:10000;background:white;padding:5px;border-radius:5px;box-shadow:0 2px 10px rgba(0,0,0,0.2);">
                         <a href="/" style="display:block;padding:8px 15px;background:#007cba;color:white;text-decoration:none;border-radius:3px;font-family:Arial,sans-serif;font-size:14px;">Home</a>
@@ -457,16 +489,23 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                         body_end = content.find(b'>', body_start) + 1
                         content = content[:body_end] + home_button + content[body_end:]
                 
+                # 发送响应头
                 self.send_response(response.getcode())
                 
+                # 设置cookie来跟踪当前网站
+                if set_cookie:
+                    self.send_header('Set-Cookie', f'current_site={base_url}')
+                
+                # 复制响应头
                 for key, value in response.headers.items():
                     key_lower = key.lower()
-                    if key_lower not in ['content-encoding', 'transfer-encoding', 'connection', 'content-length']:
+                    if key_lower not in ['content-encoding', 'transfer-encoding', 'connection', 'content-length', 'set-cookie']:
                         self.send_header(key, value)
                 
                 self.send_header('Content-Length', str(len(content)))
                 self.end_headers()
                 
+                # 发送响应内容
                 self.wfile.write(content)
                 
         except urllib.error.HTTPError as e:
@@ -481,6 +520,56 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             print(f"Proxy request error: {e}")
             self.send_error(500, f"Proxy request error: {str(e)}")
+
+    def rewrite_links(self, content, base_url):
+        """重写HTML中的相对链接为绝对链接"""
+        try:
+            # 将字节内容转换为字符串
+            html_content = content.decode('utf-8', errors='ignore')
+            
+            # 重写各种类型的链接
+            import re
+            
+            # 重写 href 属性
+            html_content = re.sub(
+                r'href="/([^"]*)"',
+                f'href="/proxy/{base_url}/\\1"',
+                html_content
+            )
+            
+            # 重写以 // 开头的协议相对URL
+            html_content = re.sub(
+                r'href="//([^"]*)"',
+                f'href="/proxy/https://\\1"',
+                html_content
+            )
+            
+            # 重写相对路径（不以/开头）
+            html_content = re.sub(
+                r'href="([^"/][^"]*)"',
+                f'href="/proxy/{base_url}/\\1"',
+                html_content
+            )
+            
+            # 重写 action 属性（表单）
+            html_content = re.sub(
+                r'action="/([^"]*)"',
+                f'action="/proxy/{base_url}/\\1"',
+                html_content
+            )
+            
+            # 重写 src 属性
+            html_content = re.sub(
+                r'src="/([^"]*)"',
+                f'src="/proxy/{base_url}/\\1"',
+                html_content
+            )
+            
+            return html_content.encode('utf-8')
+            
+        except Exception as e:
+            print(f"Error rewriting links: {e}")
+            return content
 
     def log_message(self, format, *args):
         message = format % args
