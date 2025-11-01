@@ -29,6 +29,7 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Connection', 'close')
             self.end_headers()
             
+            # 添加返回首页按钮的错误页面
             error_content = f"""
             <!DOCTYPE html>
             <html>
@@ -36,14 +37,41 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 <meta charset="utf-8">
                 <title>错误 {code}</title>
                 <style>
-                    body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                    body {{ 
+                        font-family: Arial, sans-serif; 
+                        margin: 40px; 
+                        background-color: #f5f5f5;
+                    }}
+                    .container {{
+                        max-width: 800px;
+                        margin: 0 auto;
+                        background: white;
+                        padding: 30px;
+                        border-radius: 10px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    }}
                     h1 {{ color: #d32f2f; }}
+                    .home-button {{
+                        display: inline-block;
+                        padding: 10px 20px;
+                        background: #007cba;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 5px;
+                        margin-top: 20px;
+                    }}
+                    .home-button:hover {{
+                        background: #005a87;
+                    }}
                 </style>
             </head>
             <body>
-                <h1>错误 {code}</h1>
-                <p><strong>{message}</strong></p>
-                <p>{explain if explain else ''}</p>
+                <div class="container">
+                    <h1>错误 {code}</h1>
+                    <p><strong>{message}</strong></p>
+                    <p>{explain if explain else ''}</p>
+                    <a href="/" class="home-button">返回首页</a>
+                </div>
             </body>
             </html>
             """
@@ -61,6 +89,17 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.show_homepage()
                 return
                 
+            # 处理相对URL的情况（如搜索查询）
+            if not url.startswith(('http://', 'https://')):
+                # 如果是搜索查询参数，构造完整的URL
+                if '?' in url or '=' in url:
+                    # 这是一个搜索查询，我们将其重定向到主页进行提示
+                    self.show_search_help(url)
+                    return
+                else:
+                    # 其他情况，尝试添加https://前缀
+                    url = 'https://' + url
+            
             # 代理请求
             self.proxy_request(url)
             
@@ -80,6 +119,10 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             if not url:
                 self.send_error(400, "缺少目标URL")
                 return
+                
+            # 处理相对URL的情况
+            if not url.startswith(('http://', 'https://')):
+                url = 'https://' + url
                 
             # 代理POST请求
             self.proxy_post_request(url, post_data)
@@ -102,10 +145,31 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 <meta charset="utf-8">
                 <title>网页代理服务器</title>
                 <style>
+                    * {
+                        box-sizing: border-box;
+                    }
                     body { 
                         font-family: Arial, sans-serif; 
-                        margin: 40px; 
+                        margin: 0;
+                        padding: 0;
                         background-color: #f5f5f5;
+                        position: relative;
+                        min-height: 100vh;
+                    }
+                    .fixed-home-button {
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        padding: 10px 20px;
+                        background: #007cba;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 5px;
+                        z-index: 1000;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                    }
+                    .fixed-home-button:hover {
+                        background: #005a87;
                     }
                     .container {
                         max-width: 800px;
@@ -114,10 +178,13 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                         padding: 30px;
                         border-radius: 10px;
                         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                        margin-top: 20px;
+                        margin-bottom: 20px;
                     }
                     h1 { 
                         color: #333; 
                         text-align: center;
+                        margin-top: 0;
                     }
                     .search-box {
                         display: flex;
@@ -164,20 +231,35 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                         border-radius: 5px;
                         font-size: 14px;
                     }
+                    .warning {
+                        margin-top: 20px;
+                        padding: 15px;
+                        background: #fff3cd;
+                        border: 1px solid #ffeaa7;
+                        border-radius: 5px;
+                        color: #856404;
+                    }
                 </style>
             </head>
             <body>
+                <!-- 固定在右上角的返回首页按钮 -->
+                <a href="/" class="fixed-home-button">🏠 返回首页</a>
+                
                 <div class="container">
                     <h1>🌐 网页代理服务器</h1>
                     
                     <form id="searchForm" onsubmit="return handleSearch()">
                         <div class="search-box">
                             <input type="text" id="url" class="search-input" 
-                                   placeholder="输入网址 (例如: https://www.example.com)" 
+                                   placeholder="输入完整网址 (例如: https://www.baidu.com)" 
                                    value="https://">
                             <button type="submit" class="search-button">访问</button>
                         </div>
                     </form>
+                    
+                    <div class="warning">
+                        <strong>注意:</strong> 请确保输入完整的网址，包含 http:// 或 https://
+                    </div>
                     
                     <div class="quick-links">
                         <strong>快速访问:</strong><br>
@@ -185,13 +267,16 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                         <a href="#" onclick="quickVisit('https://www.google.com')">Google</a>
                         <a href="#" onclick="quickVisit('https://github.com')">GitHub</a>
                         <a href="#" onclick="quickVisit('https://www.bilibili.com')">B站</a>
+                        <a href="#" onclick="quickVisit('https://www.zhihu.com')">知乎</a>
+                        <a href="#" onclick="quickVisit('https://weibo.com')">微博</a>
                     </div>
                     
                     <div class="info">
                         <strong>使用说明:</strong><br>
-                        1. 在输入框中输入完整的网址（包含 https:// 或 http://）<br>
+                        1. 在输入框中输入完整的网址（必须包含 https:// 或 http://）<br>
                         2. 点击"访问"按钮或按回车键<br>
-                        3. 支持大多数网站的代理访问
+                        3. 支持大多数网站的代理访问<br>
+                        4. 右上角有固定的"返回首页"按钮，随时可以回到此页面
                     </div>
                 </div>
                 
@@ -205,7 +290,8 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                         
                         // 确保URL包含协议
                         if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                            url = 'https://' + url;
+                            alert('请输入完整的网址，包含 http:// 或 https://');
+                            return false;
                         }
                         
                         // 使用代理访问
@@ -224,6 +310,11 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                             handleSearch();
                         }
                     });
+                    
+                    // 页面加载后自动聚焦输入框
+                    window.onload = function() {
+                        document.getElementById('url').focus();
+                    };
                 </script>
             </body>
             </html>
@@ -233,6 +324,88 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             print(f"显示主页时出错: {e}")
             self.send_error(500, f"显示主页时出错: {str(e)}")
+
+    def show_search_help(self, search_query):
+        """显示搜索帮助页面"""
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            
+            help_page = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>搜索帮助</title>
+                <style>
+                    body {{ 
+                        font-family: Arial, sans-serif; 
+                        margin: 40px; 
+                        background-color: #f5f5f5;
+                    }}
+                    .container {{
+                        max-width: 800px;
+                        margin: 0 auto;
+                        background: white;
+                        padding: 30px;
+                        border-radius: 10px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    }}
+                    .home-button {{
+                        display: inline-block;
+                        padding: 10px 20px;
+                        background: #007cba;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 5px;
+                        margin-top: 20px;
+                    }}
+                    .home-button:hover {{
+                        background: #005a87;
+                    }}
+                    .warning {{
+                        background: #fff3cd;
+                        border: 1px solid #ffeaa7;
+                        padding: 15px;
+                        border-radius: 5px;
+                        margin: 20px 0;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>搜索帮助</h1>
+                    
+                    <div class="warning">
+                        <strong>注意:</strong> 检测到您可能输入了搜索查询而不是完整的网址。
+                    </div>
+                    
+                    <p>您输入的查询: <code>{search_query}</code></p>
+                    
+                    <p>代理服务器需要完整的网址才能工作，例如:</p>
+                    <ul>
+                        <li><code>https://www.baidu.com</code></li>
+                        <li><code>https://www.google.com</code></li>
+                        <li><code>https://github.com</code></li>
+                    </ul>
+                    
+                    <p>如果您想进行搜索，请:</p>
+                    <ol>
+                        <li>先访问搜索引擎网站（如百度、Google）</li>
+                        <li>然后在搜索框中进行搜索</li>
+                    </ol>
+                    
+                    <a href="/" class="home-button">返回首页</a>
+                </div>
+            </body>
+            </html>
+            """
+            self.wfile.write(help_page.encode('utf-8'))
+            
+        except Exception as e:
+            print(f"显示搜索帮助时出错: {e}")
+            self.send_error(500, f"显示搜索帮助时出错: {str(e)}")
 
     def proxy_request(self, url):
         """代理HTTP请求"""
@@ -399,13 +572,29 @@ def run_proxy_server(port=60000):
         server = ThreadedHTTPServer(('', available_port), ProxyRequestHandler)
         print(f"🌐 代理服务器已启动在端口 {available_port}")
         print(f"📱 请在浏览器中访问: http://localhost:{available_port}")
-        print("⏹️  要停止服务器，请按 Ctrl+C")
+        print("⏹️  要停止服务器，请按 Ctrl+C 或输入 exit")
         
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n🛑 服务器正在关闭...")
-        server.shutdown()
-        server.server_close()
+        # 启动服务器线程
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.daemon = True
+        server_thread.start()
+        
+        # 监听退出命令
+        while True:
+            try:
+                command = input().strip().lower()
+                if command in ['exit', 'quit', 'stop']:
+                    print("🛑 正在关闭服务器...")
+                    server.shutdown()
+                    server.server_close()
+                    break
+                time.sleep(0.1)
+            except (KeyboardInterrupt, EOFError):
+                print("\n🛑 正在关闭服务器...")
+                server.shutdown()
+                server.server_close()
+                break
+                
     except Exception as e:
         print(f"❌ 启动服务器时出错: {e}")
 
