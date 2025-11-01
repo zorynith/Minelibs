@@ -1,414 +1,393 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-    Cloud Shell 网页代理服务 - 修复版
-"""
+
+import socket
+import threading
+import urllib.parse
 import http.server
 import socketserver
 import urllib.request
-import urllib.parse
-import re
 import gzip
-import zlib
-import signal
-import sys
+import io
 
-class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
-    """
-    简单的HTTP代理处理器 - 修复版
-    """
-    
-    def do_GET(self):
-        print(f"收到请求: {self.path}")
-        
-        # 解析路径和查询参数
-        parsed_path = urllib.parse.urlparse(self.path)
-        query_params = urllib.parse.parse_qs(parsed_path.query)
-        
-        # 根路径 - 显示导航页面
-        if parsed_path.path == '/':
-            self.send_navigation_page()
-            return
-            
-        # 导航请求 - 代理目标网站
-        elif parsed_path.path == '/navigate' and 'url' in query_params:
-            target_url = query_params['url'][0]
-            self.proxy_website(target_url, is_main_page=True)
-            return
-            
-        # 代理请求 - 处理资源文件
-        elif parsed_path.path.startswith('/proxy/'):
-            # 修复URL解码问题
-            encoded_url = parsed_path.path[7:]  # 移除 '/proxy/'
-            
-            # 正确处理URL编码
-            try:
-                # 先解码一次（如果被编码了）
-                decoded_once = urllib.parse.unquote(encoded_url)
-                # 如果还有编码字符，再解码一次
-                if '%' in decoded_once:
-                    target_url = urllib.parse.unquote(decoded_once)
+class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
+    # 重写send_error方法以支持UTF-8编码
+    def send_error(self, code, message=None, explain=None):
+        """重写send_error方法以支持UTF-8编码"""
+        try:
+            if message is None:
+                if code in self.responses:
+                    message = self.responses[code][0]
                 else:
-                    target_url = decoded_once
-                    
-                # 修复常见的URL编码错误
-                target_url = target_url.replace('https%3A/', 'https://')
-                target_url = target_url.replace('http%3A/', 'http://')
-                target_url = target_url.replace('https:/', 'https://')
-                target_url = target_url.replace('http:/', 'http://')
-                
-                print(f"解码后URL: {target_url}")
-                self.proxy_website(target_url, is_main_page=False)
-            except Exception as e:
-                print(f"URL解码错误: {e}")
-                self.send_error(400, f"URL格式错误: {e}")
-            return
+                    message = ''
             
-        else:
-            self.send_error(404, "页面未找到")
-    
-    def send_navigation_page(self):
-        """发送导航页面"""
-        html = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Cloud Shell 网页代理</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    margin: 0;
-                    padding: 20px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    min-height: 100vh;
-                }
-                .container {
-                    max-width: 600px;
-                    margin: 0 auto;
-                    background: white;
-                    border-radius: 12px;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-                    overflow: hidden;
-                }
-                .header {
-                    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-                    color: white;
-                    padding: 30px;
-                    text-align: center;
-                }
-                .header h1 {
-                    margin: 0;
-                    font-size: 2em;
-                }
-                .content {
-                    padding: 30px;
-                }
-                .input-group {
-                    display: flex;
-                    margin-bottom: 20px;
-                    border: 2px solid #e1e5e9;
-                    border-radius: 8px;
-                    overflow: hidden;
-                }
-                .url-input {
-                    flex: 1;
-                    padding: 15px;
-                    border: none;
-                    outline: none;
-                    font-size: 16px;
-                }
-                .submit-btn {
-                    background: #4facfe;
-                    color: white;
-                    border: none;
-                    padding: 0 25px;
-                    cursor: pointer;
-                    font-size: 16px;
-                }
-                .quick-links {
-                    margin-top: 30px;
-                }
-                .quick-link {
-                    display: block;
-                    padding: 12px 15px;
-                    margin: 8px 0;
-                    background: #f7fafc;
-                    border: 1px solid #e2e8f0;
-                    border-radius: 6px;
-                    text-decoration: none;
-                    color: #4a5568;
-                    transition: all 0.2s;
-                }
-                .quick-link:hover {
-                    background: #4facfe;
-                    color: white;
-                }
-                .info-box {
-                    background: #f0f9ff;
-                    border-left: 4px solid #4facfe;
-                    padding: 15px;
-                    margin-top: 20px;
-                    border-radius: 0 8px 8px 0;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>🌐 Cloud Shell 网页代理</h1>
-                    <p>输入网址开始浏览</p>
-                </div>
+            self.send_response(code)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            
+            error_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>错误 {code}</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                    h1 {{ color: #d32f2f; }}
+                </style>
+            </head>
+            <body>
+                <h1>错误 {code}</h1>
+                <p><strong>{message}</strong></p>
+                <p>{explain if explain else ''}</p>
+            </body>
+            </html>
+            """
+            self.wfile.write(error_content.encode('utf-8'))
+        except Exception as e:
+            # 如果连错误页面都发送失败，至少记录错误
+            print(f"发送错误页面失败: {e}")
+
+    def do_GET(self):
+        try:
+            # 解析URL
+            url = self.path[1:]  # 去掉开头的/
+            
+            # 如果URL为空，显示主页
+            if not url:
+                self.show_homepage()
+                return
                 
-                <div class="content">
-                    <form action="/navigate" method="get">
-                        <div class="input-group">
-                            <input type="url" name="url" class="url-input" 
-                                   placeholder="https://www.example.com" 
-                                   required value="https://www.so.com">
-                            <button type="submit" class="submit-btn">访问</button>
+            # 如果是本地文件请求
+            if url.startswith('local/'):
+                self.serve_local_file(url)
+                return
+                
+            # 代理请求
+            self.proxy_request(url)
+            
+        except Exception as e:
+            print(f"处理GET请求时出错: {e}")
+            self.send_error(500, f"服务器内部错误: {str(e)}")
+
+    def do_POST(self):
+        try:
+            # 获取POST数据
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length) if content_length > 0 else b''
+            
+            # 解析URL
+            url = self.path[1:]
+            
+            if not url:
+                self.send_error(400, "缺少目标URL")
+                return
+                
+            # 代理POST请求
+            self.proxy_post_request(url, post_data)
+            
+        except Exception as e:
+            print(f"处理POST请求时出错: {e}")
+            self.send_error(500, f"服务器内部错误: {str(e)}")
+
+    def show_homepage(self):
+        """显示代理服务器主页"""
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            
+            homepage = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>网页代理服务器</title>
+                <style>
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        margin: 40px; 
+                        background-color: #f5f5f5;
+                    }
+                    .container {
+                        max-width: 800px;
+                        margin: 0 auto;
+                        background: white;
+                        padding: 30px;
+                        border-radius: 10px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    }
+                    h1 { 
+                        color: #333; 
+                        text-align: center;
+                    }
+                    .search-box {
+                        display: flex;
+                        margin: 20px 0;
+                    }
+                    .search-input {
+                        flex: 1;
+                        padding: 10px;
+                        font-size: 16px;
+                        border: 2px solid #ddd;
+                        border-radius: 5px 0 0 5px;
+                    }
+                    .search-button {
+                        padding: 10px 20px;
+                        background: #007cba;
+                        color: white;
+                        border: none;
+                        border-radius: 0 5px 5px 0;
+                        cursor: pointer;
+                        font-size: 16px;
+                    }
+                    .search-button:hover {
+                        background: #005a87;
+                    }
+                    .quick-links {
+                        margin-top: 30px;
+                    }
+                    .quick-links a {
+                        display: inline-block;
+                        margin: 5px 10px 5px 0;
+                        padding: 8px 15px;
+                        background: #eee;
+                        border-radius: 5px;
+                        text-decoration: none;
+                        color: #333;
+                    }
+                    .quick-links a:hover {
+                        background: #ddd;
+                    }
+                    .info {
+                        margin-top: 20px;
+                        padding: 15px;
+                        background: #e7f3ff;
+                        border-radius: 5px;
+                        font-size: 14px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🌐 网页代理服务器</h1>
+                    
+                    <form id="searchForm" onsubmit="return handleSearch()">
+                        <div class="search-box">
+                            <input type="text" id="url" class="search-input" 
+                                   placeholder="输入网址 (例如: https://www.example.com)" 
+                                   value="https://">
+                            <button type="submit" class="search-button">访问</button>
                         </div>
                     </form>
                     
                     <div class="quick-links">
-                        <strong>常用网站:</strong>
-                        <a href="/navigate?url=https://www.so.com" class="quick-link">🔍 360搜索</a>
-                        <a href="/navigate?url=https://www.baidu.com" class="quick-link">🔍 百度</a>
-                        <a href="/navigate?url=https://www.google.com" class="quick-link">🔍 Google</a>
-                        <a href="/navigate?url=https://github.com" class="quick-link">💻 GitHub</a>
+                        <strong>快速访问:</strong><br>
+                        <a href="#" onclick="quickVisit('https://www.baidu.com')">百度</a>
+                        <a href="#" onclick="quickVisit('https://www.google.com')">Google</a>
+                        <a href="#" onclick="quickVisit('https://github.com')">GitHub</a>
+                        <a href="#" onclick="quickVisit('https://www.bilibili.com')">B站</a>
                     </div>
                     
-                    <div class="info-box">
-                        <strong>💡 提示:</strong> 如果页面显示不正常，请尝试刷新页面或检查网址格式。
+                    <div class="info">
+                        <strong>使用说明:</strong><br>
+                        1. 在输入框中输入完整的网址（包含 https:// 或 http://）<br>
+                        2. 点击"访问"按钮或按回车键<br>
+                        3. 支持大多数网站的代理访问
                     </div>
                 </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(html.encode('utf-8'))
-    
-    def proxy_website(self, target_url, is_main_page=False):
-        """代理目标网站"""
-        print(f"开始代理: {target_url}")
-        
+                
+                <script>
+                    function handleSearch() {
+                        let url = document.getElementById('url').value.trim();
+                        if (!url) {
+                            alert('请输入网址');
+                            return false;
+                        }
+                        
+                        // 确保URL包含协议
+                        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                            url = 'https://' + url;
+                        }
+                        
+                        // 使用代理访问
+                        window.location.href = '/' + encodeURIComponent(url);
+                        return false;
+                    }
+                    
+                    function quickVisit(url) {
+                        document.getElementById('url').value = url;
+                        handleSearch();
+                    }
+                    
+                    // 回车键提交
+                    document.getElementById('url').addEventListener('keypress', function(e) {
+                        if (e.key === 'Enter') {
+                            handleSearch();
+                        }
+                    });
+                </script>
+            </body>
+            </html>
+            """
+            self.wfile.write(homepage.encode('utf-8'))
+            
+        except Exception as e:
+            print(f"显示主页时出错: {e}")
+            self.send_error(500, f"显示主页时出错: {str(e)}")
+
+    def proxy_request(self, url):
+        """代理HTTP请求"""
         try:
-            # 验证和修复URL
-            if not target_url.startswith(('http://', 'https://')):
-                target_url = 'https://' + target_url
+            # 解码URL（可能被编码过）
+            try:
+                url = urllib.parse.unquote(url)
+            except:
+                pass
+                
+            print(f"正在代理访问: {url}")
             
             # 设置请求头
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive',
-            }
+            headers = {}
+            for key, value in self.headers.items():
+                if key.lower() not in ['host', 'connection', 'accept-encoding']:
+                    headers[key] = value
+            
+            # 添加常见的浏览器头
+            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+            headers['Accept-Language'] = 'zh-CN,zh;q=0.9,en;q=0.8'
             
             # 创建请求
-            req = urllib.request.Request(target_url, headers=headers)
+            req = urllib.request.Request(url, headers=headers)
             
-            # 发起请求
-            response = urllib.request.urlopen(req, timeout=30)
-            
-            # 读取响应内容
-            content = response.read()
-            content_type = response.headers.get('Content-Type', 'text/html')
-            
-            # 处理压缩内容
-            content_encoding = response.headers.get('Content-Encoding', '').lower()
-            if 'gzip' in content_encoding:
-                try:
+            # 发送请求
+            with urllib.request.urlopen(req, timeout=30) as response:
+                # 获取响应数据
+                content = response.read()
+                
+                # 处理gzip压缩
+                if response.headers.get('Content-Encoding') == 'gzip':
                     content = gzip.decompress(content)
-                except (gzip.BadGzipFile, EOFError):
-                    pass
-            elif 'deflate' in content_encoding:
-                try:
-                    content = zlib.decompress(content)
-                except zlib.error:
-                    pass
-            
-            # 重写内容中的链接（仅对HTML内容）
-            if 'text/html' in content_type.lower() and is_main_page:
-                content = self.rewrite_html_content(content, target_url)
-            
-            # 发送响应
-            self.send_response(response.status)
-            
-            # 复制响应头（过滤不合适的头）
-            for key, value in response.headers.items():
-                key_lower = key.lower()
-                if key_lower not in ['connection', 'transfer-encoding', 'content-encoding', 
-                                   'content-length', 'strict-transport-security']:
-                    self.send_header(key, value)
-            
-            self.send_header('Content-Length', str(len(content)))
-            self.end_headers()
-            
-            # 返回响应内容
-            self.wfile.write(content)
-            
-            print(f"代理成功: {target_url}")
-            
+                
+                # 发送响应头
+                self.send_response(response.getcode())
+                
+                # 复制响应头（排除一些不合适的头）
+                for key, value in response.headers.items():
+                    key_lower = key.lower()
+                    if key_lower not in ['content-encoding', 'transfer-encoding', 'connection']:
+                        self.send_header(key, value)
+                
+                # 确保使用UTF-8编码
+                if 'content-type' in response.headers and 'charset' not in response.headers['content-type'].lower():
+                    content_type = response.headers['content-type']
+                    if content_type.startswith('text/'):
+                        self.send_header('Content-Type', content_type + '; charset=utf-8')
+                
+                self.end_headers()
+                
+                # 发送响应内容
+                self.wfile.write(content)
+                
+        except urllib.error.HTTPError as e:
+            print(f"HTTP错误: {e.code} - {e.reason}")
+            self.send_error(e.code, f"代理请求失败: {e.reason}")
+        except urllib.error.URLError as e:
+            print(f"URL错误: {e.reason}")
+            self.send_error(502, f"无法连接到目标网站: {str(e.reason)}")
+        except socket.timeout:
+            print("请求超时")
+            self.send_error(504, "请求超时")
         except Exception as e:
-            print(f"代理错误: {e}")
-            self.send_error_page(f"无法访问 {target_url}", str(e))
-    
-    def rewrite_html_content(self, content, base_url):
-        """重写HTML内容中的链接"""
+            print(f"代理请求时出错: {e}")
+            self.send_error(500, f"代理请求时出错: {str(e)}")
+
+    def proxy_post_request(self, url, post_data):
+        """代理POST请求"""
         try:
-            # 解码内容
-            html_content = content.decode('utf-8', errors='ignore')
-            
-            # 解析基础URL
-            parsed_base = urllib.parse.urlparse(base_url)
-            base_domain = parsed_base.netloc
-            base_scheme = parsed_base.scheme
-            
-            # 重写各种链接 - 使用更精确的正则表达式
-            patterns = [
-                # href属性 - 绝对URL
-                (r'href=(["\'])(https?://[^"\']*?)(["\'])', 
-                 lambda m: f'href={m.group(1)}/proxy/{urllib.parse.quote(m.group(2), safe="")}{m.group(3)}'),
+            # 解码URL
+            try:
+                url = urllib.parse.unquote(url)
+            except:
+                pass
                 
-                # src属性 - 绝对URL
-                (r'src=(["\'])(https?://[^"\']*?)(["\'])',
-                 lambda m: f'src={m.group(1)}/proxy/{urllib.parse.quote(m.group(2), safe="")}{m.group(3)}'),
+            print(f"正在代理POST访问: {url}")
+            
+            # 设置请求头
+            headers = {}
+            for key, value in self.headers.items():
+                if key.lower() not in ['host', 'connection', 'content-length']:
+                    headers[key] = value
+            
+            # 添加常见的浏览器头
+            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            
+            # 创建POST请求
+            req = urllib.request.Request(url, data=post_data, headers=headers, method='POST')
+            
+            # 发送请求
+            with urllib.request.urlopen(req, timeout=30) as response:
+                # 获取响应数据
+                content = response.read()
                 
-                # action属性 - 绝对URL
-                (r'action=(["\'])(https?://[^"\']*?)(["\'])',
-                 lambda m: f'action={m.group(1)}/proxy/{urllib.parse.quote(m.group(2), safe="")}{m.group(3)}'),
-            ]
-            
-            for pattern, replacement in patterns:
-                html_content = re.sub(pattern, replacement, html_content)
-            
-            # 重写相对路径
-            def make_absolute(match):
-                tag, attr, quote, path = match.groups()
+                # 处理gzip压缩
+                if response.headers.get('Content-Encoding') == 'gzip':
+                    content = gzip.decompress(content)
                 
-                # 跳过特殊协议
-                if path.startswith(('javascript:', 'mailto:', 'tel:', '#')):
-                    return match.group(0)
+                # 发送响应头
+                self.send_response(response.getcode())
                 
-                if path.startswith('//'):
-                    # 协议相对URL
-                    absolute_url = f"{base_scheme}:{path}"
-                elif path.startswith('/'):
-                    # 根相对路径
-                    absolute_url = f"{base_scheme}://{base_domain}{path}"
-                else:
-                    # 文档相对路径
-                    absolute_url = urllib.parse.urljoin(base_url, path)
+                # 复制响应头
+                for key, value in response.headers.items():
+                    key_lower = key.lower()
+                    if key_lower not in ['content-encoding', 'transfer-encoding', 'connection']:
+                        self.send_header(key, value)
                 
-                return f'{tag}{attr}={quote}/proxy/{urllib.parse.quote(absolute_url, safe="")}{quote}'
-            
-            # 重写相对路径的href
-            html_content = re.sub(
-                r'(\bhref)=(["\'])([^"\'#]*?)(["\'])',
-                make_absolute,
-                html_content
-            )
-            
-            # 重写相对路径的src
-            html_content = re.sub(
-                r'(\bsrc)=(["\'])([^"\'#]*?)(["\'])',
-                make_absolute,
-                html_content
-            )
-            
-            return html_content.encode('utf-8')
-            
+                self.end_headers()
+                
+                # 发送响应内容
+                self.wfile.write(content)
+                
         except Exception as e:
-            print(f"内容重写错误: {e}")
-            return content
-    
-    def send_error_page(self, title, message):
-        """发送错误页面"""
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>错误 - {title}</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; }}
-                .error {{ background: #ffecec; border: 1px solid #f5aca6; padding: 20px; border-radius: 5px; }}
-                a {{ color: #0066cc; }}
-            </style>
-        </head>
-        <body>
-            <h1>😕 {title}</h1>
-            <div class="error">
-                <p><strong>错误信息:</strong> {message}</p>
-            </div>
-            <p><a href="/">返回首页</a></p>
-        </body>
-        </html>
-        """
-        
-        self.send_response(500)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(html.encode('utf-8'))
+            print(f"代理POST请求时出错: {e}")
+            self.send_error(500, f"代理POST请求时出错: {str(e)}")
 
-# 全局变量，用于控制服务器运行
-server_running = True
+    def log_message(self, format, *args):
+        """重写日志方法，使用UTF-8编码输出"""
+        message = format % args
+        try:
+            print(message)
+        except UnicodeEncodeError:
+            # 如果遇到编码问题，使用安全的编码方式
+            safe_message = message.encode('utf-8', errors='replace').decode('utf-8')
+            print(safe_message)
 
-def signal_handler(sig, frame):
-    """处理Ctrl+C信号"""
-    global server_running
-    print("\n正在关闭服务器...")
-    server_running = False
-    sys.exit(0)
+class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    """支持多线程的HTTP服务器"""
+    daemon_threads = True
 
-def main():
-    """主函数"""
-    PORT = 60000
-    
-    # 注册信号处理器
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    print("=" * 60)
-    print("🌐 Cloud Shell 网页代理服务 - 修复版")
-    print("=" * 60)
-    print(f"📡 服务启动在端口: {PORT}")
-    print("💡 请在Cloud Shell中点击'网页预览' -> '预览端口 60000'")
-    print("⏹️  按 Ctrl+C 停止服务")
-    print("=" * 60)
-    
+def run_proxy_server(port=8080):
+    """运行代理服务器"""
     try:
-        # 创建服务器
-        with socketserver.TCPServer(("", PORT), SimpleProxyHandler) as httpd:
-            httpd.timeout = 1  # 设置超时，以便可以检查server_running
-            
-            print("服务器已启动，等待连接...")
-            
-            while server_running:
-                try:
-                    httpd.handle_request()
-                except socket.timeout:
-                    # 超时是正常的，继续循环
-                    continue
-                except KeyboardInterrupt:
-                    break
-                except Exception as e:
-                    if server_running:
-                        print(f"处理请求时出错: {e}")
-                        continue
-                    else:
-                        break
-            
-            print("服务器已停止")
-            
+        server = ThreadedHTTPServer(('', port), ProxyRequestHandler)
+        print(f"🌐 代理服务器已启动在端口 {port}")
+        print(f"📱 请在浏览器中访问: http://localhost:{port}")
+        print("⏹️  要停止服务器，请按 Ctrl+C")
+        
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n🛑 服务器正在关闭...")
+        server.shutdown()
     except Exception as e:
-        print(f"启动失败: {e}")
-    finally:
-        print("服务已退出")
+        print(f"❌ 启动服务器时出错: {e}")
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    # 设置默认端口
+    PORT = 8080
+    
+    # 可以在这里修改端口
+    # PORT = 60000
+    
+    run_proxy_server(PORT)
