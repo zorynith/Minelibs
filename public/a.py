@@ -244,10 +244,10 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             </head>
             <body>
                 <!-- 固定在右上角的返回首页按钮 -->
-                <a href="/" class="fixed-home-button">🏠 返回首页</a>
+                <a href="/" class="fixed-home-button">返回首页</a>
                 
                 <div class="container">
-                    <h1>🌐 网页代理服务器</h1>
+                    <h1>网页代理服务器</h1>
                     
                     <form id="searchForm" onsubmit="return handleSearch()">
                         <div class="search-box">
@@ -290,7 +290,7 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                         }
                         
                         // 清理URL，移除可能的多余协议
-                        url = url.replace(/^https?:\/\//, '');
+                        url = url.replace(/^https?:\\/\\//, '');
                         
                         // 使用代理访问
                         window.location.href = '/' + encodeURIComponent(url);
@@ -384,7 +384,7 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 </style>
             </head>
             <body>
-                <a href="/" class="fixed-home-button">🏠 返回首页</a>
+                <a href="/" class="fixed-home-button">返回首页</a>
                 
                 <div class="container">
                     <h1>URL格式错误</h1>
@@ -455,25 +455,7 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                     if key_lower not in ['content-encoding', 'transfer-encoding', 'connection', 'content-length']:
                         self.send_header(key, value)
                 
-                # 添加返回首页的JavaScript
-                self.send_header('Content-Type', 'text/html; charset=utf-8')
-                
                 self.end_headers()
-                
-                # 在页面底部添加返回首页按钮
-                if b'</body>' in content.lower():
-                    return_button = b'''
-                    <div style="position:fixed;top:20px;right:20px;z-index:9999;">
-                        <a href="/" style="padding:10px 20px;background:#007cba;color:white;text-decoration:none;border-radius:5px;">🏠 返回首页</a>
-                    </div>
-                    <script>
-                        // 添加返回首页按钮
-                        var homeBtn = document.createElement('div');
-                        homeBtn.innerHTML = '<a href="/" style="position:fixed;top:20px;right:20px;padding:10px 20px;background:#007cba;color:white;text-decoration:none;border-radius:5px;z-index:9999;">🏠 返回首页</a>';
-                        document.body.appendChild(homeBtn);
-                    </script>
-                    '''
-                    content = content.replace(b'</body>', return_button + b'</body>')
                 
                 # 发送响应内容
                 self.wfile.write(content)
@@ -508,7 +490,7 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 def run_proxy_server():
     """运行代理服务器"""
     # 尝试多个端口
-    ports = [8080, 8888, 8000, 3000, 5000, 6000]
+    ports = [60000, 61000, 62000, 63000, 64000, 65000]
     
     for port in ports:
         try:
@@ -520,45 +502,25 @@ def run_proxy_server():
                 pass
             
             server = ThreadedHTTPServer(('', port), ProxyRequestHandler)
-            print(f"🌐 代理服务器已启动在端口 {port}")
-            print(f"📱 请在浏览器中访问: http://localhost:{port}")
-            print("⏹️  要停止服务器，请按 Ctrl+C")
+            print(f"代理服务器已启动在端口 {port}")
+            print(f"请在浏览器中访问: http://localhost:{port}")
+            print("要停止服务器，请按 Ctrl+C")
             
-            # 启动服务器线程
-            server_thread = threading.Thread(target=server.serve_forever)
-            server_thread.daemon = True
-            server_thread.start()
-            
-            print(f"✅ 服务器在端口 {port} 启动成功!")
-            
-            # 监听退出命令
-            while True:
-                try:
-                    command = input().strip().lower()
-                    if command in ['exit', 'quit', 'stop']:
-                        print("🛑 正在关闭服务器...")
-                        server.shutdown()
-                        server.server_close()
-                        return
-                    time.sleep(0.1)
-                except (KeyboardInterrupt, EOFError):
-                    print("\n🛑 正在关闭服务器...")
-                    server.shutdown()
-                    server.server_close()
-                    return
+            server.serve_forever()
+            return
                     
         except OSError as e:
             if "Address already in use" in str(e):
-                print(f"❌ 端口 {port} 被占用，尝试下一个端口...")
+                print(f"端口 {port} 被占用，尝试下一个端口...")
                 continue
             else:
-                print(f"❌ 端口 {port} 错误: {e}")
+                print(f"端口 {port} 错误: {e}")
                 continue
         except Exception as e:
-            print(f"❌ 启动服务器时出错: {e}")
+            print(f"启动服务器时出错: {e}")
             continue
     
-    print("❌ 所有端口都不可用，请检查系统状态")
+    print("所有端口都不可用，请检查系统状态")
 
 if __name__ == '__main__':
     run_proxy_server()
