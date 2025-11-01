@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-    Cloud Shell 网页代理服务
-    简化版本，解决空白页面问题
+    Cloud Shell 网页代理服务 - 修复版
 """
 import http.server
 import socketserver
@@ -11,11 +10,12 @@ import urllib.parse
 import re
 import gzip
 import zlib
-import threading
+import signal
+import sys
 
 class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
     """
-    简单的HTTP代理处理器
+    简单的HTTP代理处理器 - 修复版
     """
     
     def do_GET(self):
@@ -33,20 +33,39 @@ class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
         # 导航请求 - 代理目标网站
         elif parsed_path.path == '/navigate' and 'url' in query_params:
             target_url = query_params['url'][0]
-            self.proxy_website(target_url)
+            self.proxy_website(target_url, is_main_page=True)
             return
             
-        # 其他路径 - 尝试代理
+        # 代理请求 - 处理资源文件
+        elif parsed_path.path.startswith('/proxy/'):
+            # 修复URL解码问题
+            encoded_url = parsed_path.path[7:]  # 移除 '/proxy/'
+            
+            # 正确处理URL编码
+            try:
+                # 先解码一次（如果被编码了）
+                decoded_once = urllib.parse.unquote(encoded_url)
+                # 如果还有编码字符，再解码一次
+                if '%' in decoded_once:
+                    target_url = urllib.parse.unquote(decoded_once)
+                else:
+                    target_url = decoded_once
+                    
+                # 修复常见的URL编码错误
+                target_url = target_url.replace('https%3A/', 'https://')
+                target_url = target_url.replace('http%3A/', 'http://')
+                target_url = target_url.replace('https:/', 'https://')
+                target_url = target_url.replace('http:/', 'http://')
+                
+                print(f"解码后URL: {target_url}")
+                self.proxy_website(target_url, is_main_page=False)
+            except Exception as e:
+                print(f"URL解码错误: {e}")
+                self.send_error(400, f"URL格式错误: {e}")
+            return
+            
         else:
-            # 从路径中提取目标URL
-            if parsed_path.path.startswith('/proxy/'):
-                encoded_url = parsed_path.path[7:]
-                target_url = urllib.parse.unquote(encoded_url)
-                self.proxy_website(target_url)
-                return
-            else:
-                self.send_error(404, "页面未找到")
-                return
+            self.send_error(404, "页面未找到")
     
     def send_navigation_page(self):
         """发送导航页面"""
@@ -125,10 +144,12 @@ class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
                     background: #4facfe;
                     color: white;
                 }
-                .loading {
-                    text-align: center;
-                    padding: 50px;
-                    color: #666;
+                .info-box {
+                    background: #f0f9ff;
+                    border-left: 4px solid #4facfe;
+                    padding: 15px;
+                    margin-top: 20px;
+                    border-radius: 0 8px 8px 0;
                 }
             </style>
         </head>
@@ -140,21 +161,25 @@ class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
                 </div>
                 
                 <div class="content">
-                    <form action="/navigate" method="get" target="_blank">
+                    <form action="/navigate" method="get">
                         <div class="input-group">
                             <input type="url" name="url" class="url-input" 
                                    placeholder="https://www.example.com" 
-                                   required>
+                                   required value="https://www.so.com">
                             <button type="submit" class="submit-btn">访问</button>
                         </div>
                     </form>
                     
                     <div class="quick-links">
                         <strong>常用网站:</strong>
-                        <a href="/navigate?url=https://www.so.com" class="quick-link" target="_blank">🔍 360搜索</a>
-                        <a href="/navigate?url=https://www.baidu.com" class="quick-link" target="_blank">🔍 百度</a>
-                        <a href="/navigate?url=https://www.google.com" class="quick-link" target="_blank">🔍 Google</a>
-                        <a href="/navigate?url=https://github.com" class="quick-link" target="_blank">💻 GitHub</a>
+                        <a href="/navigate?url=https://www.so.com" class="quick-link">🔍 360搜索</a>
+                        <a href="/navigate?url=https://www.baidu.com" class="quick-link">🔍 百度</a>
+                        <a href="/navigate?url=https://www.google.com" class="quick-link">🔍 Google</a>
+                        <a href="/navigate?url=https://github.com" class="quick-link">💻 GitHub</a>
+                    </div>
+                    
+                    <div class="info-box">
+                        <strong>💡 提示:</strong> 如果页面显示不正常，请尝试刷新页面或检查网址格式。
                     </div>
                 </div>
             </div>
@@ -167,7 +192,7 @@ class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(html.encode('utf-8'))
     
-    def proxy_website(self, target_url):
+    def proxy_website(self, target_url, is_main_page=False):
         """代理目标网站"""
         print(f"开始代理: {target_url}")
         
@@ -208,9 +233,9 @@ class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
                 except zlib.error:
                     pass
             
-            # 重写内容中的链接
-            if 'text/html' in content_type.lower():
-                content = self.rewrite_content(content, target_url)
+            # 重写内容中的链接（仅对HTML内容）
+            if 'text/html' in content_type.lower() and is_main_page:
+                content = self.rewrite_html_content(content, target_url)
             
             # 发送响应
             self.send_response(response.status)
@@ -234,59 +259,65 @@ class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
             print(f"代理错误: {e}")
             self.send_error_page(f"无法访问 {target_url}", str(e))
     
-    def rewrite_content(self, content, base_url):
+    def rewrite_html_content(self, content, base_url):
         """重写HTML内容中的链接"""
         try:
             # 解码内容
-            html_content = content.decode('utf-8')
+            html_content = content.decode('utf-8', errors='ignore')
             
             # 解析基础URL
             parsed_base = urllib.parse.urlparse(base_url)
             base_domain = parsed_base.netloc
+            base_scheme = parsed_base.scheme
             
-            # 重写各种链接
+            # 重写各种链接 - 使用更精确的正则表达式
             patterns = [
-                # href属性
-                (r'href=(["\'])(https?://[^"\']*?)\1', 
-                 lambda m: f'href={m.group(1)}/proxy/{urllib.parse.quote(m.group(2))}{m.group(1)}'),
+                # href属性 - 绝对URL
+                (r'href=(["\'])(https?://[^"\']*?)(["\'])', 
+                 lambda m: f'href={m.group(1)}/proxy/{urllib.parse.quote(m.group(2), safe="")}{m.group(3)}'),
                 
-                # src属性
-                (r'src=(["\'])(https?://[^"\']*?)\1',
-                 lambda m: f'src={m.group(1)}/proxy/{urllib.parse.quote(m.group(2))}{m.group(1)}'),
+                # src属性 - 绝对URL
+                (r'src=(["\'])(https?://[^"\']*?)(["\'])',
+                 lambda m: f'src={m.group(1)}/proxy/{urllib.parse.quote(m.group(2), safe="")}{m.group(3)}'),
                 
-                # action属性
-                (r'action=(["\'])(https?://[^"\']*?)\1',
-                 lambda m: f'action={m.group(1)}/proxy/{urllib.parse.quote(m.group(2))}{m.group(1)}'),
+                # action属性 - 绝对URL
+                (r'action=(["\'])(https?://[^"\']*?)(["\'])',
+                 lambda m: f'action={m.group(1)}/proxy/{urllib.parse.quote(m.group(2), safe="")}{m.group(3)}'),
             ]
             
             for pattern, replacement in patterns:
                 html_content = re.sub(pattern, replacement, html_content)
             
-            # 重写相对路径（转换为绝对路径）
+            # 重写相对路径
             def make_absolute(match):
                 tag, attr, quote, path = match.groups()
+                
+                # 跳过特殊协议
+                if path.startswith(('javascript:', 'mailto:', 'tel:', '#')):
+                    return match.group(0)
+                
                 if path.startswith('//'):
                     # 协议相对URL
-                    absolute_url = f"https:{path}"
+                    absolute_url = f"{base_scheme}:{path}"
                 elif path.startswith('/'):
                     # 根相对路径
-                    absolute_url = f"{parsed_base.scheme}://{base_domain}{path}"
+                    absolute_url = f"{base_scheme}://{base_domain}{path}"
                 else:
                     # 文档相对路径
                     absolute_url = urllib.parse.urljoin(base_url, path)
                 
-                return f'{tag}{attr}={quote}/proxy/{urllib.parse.quote(absolute_url)}{quote}'
+                return f'{tag}{attr}={quote}/proxy/{urllib.parse.quote(absolute_url, safe="")}{quote}'
             
             # 重写相对路径的href
             html_content = re.sub(
-                r'(\w+)href=(["\'])([^"\'#]*?)(["\'])',
+                r'(\bhref)=(["\'])([^"\'#]*?)(["\'])',
                 make_absolute,
                 html_content
             )
             
             # 重写相对路径的src
             html_content = re.sub(
-                r'(\w+src)=(["\'])([^"\'#]*?)(["\'])',
+                r'(\bsrc)=(["\'])([^"\'#]*?)(["\'])',
                 make_absolute,
                 html_content
             )
@@ -325,12 +356,25 @@ class SimpleProxyHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(html.encode('utf-8'))
 
+# 全局变量，用于控制服务器运行
+server_running = True
+
+def signal_handler(sig, frame):
+    """处理Ctrl+C信号"""
+    global server_running
+    print("\n正在关闭服务器...")
+    server_running = False
+    sys.exit(0)
+
 def main():
     """主函数"""
     PORT = 60000
     
+    # 注册信号处理器
+    signal.signal(signal.SIGINT, signal_handler)
+    
     print("=" * 60)
-    print("🌐 Cloud Shell 网页代理服务")
+    print("🌐 Cloud Shell 网页代理服务 - 修复版")
     print("=" * 60)
     print(f"📡 服务启动在端口: {PORT}")
     print("💡 请在Cloud Shell中点击'网页预览' -> '预览端口 60000'")
@@ -338,12 +382,33 @@ def main():
     print("=" * 60)
     
     try:
+        # 创建服务器
         with socketserver.TCPServer(("", PORT), SimpleProxyHandler) as httpd:
-            httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\n服务已停止")
+            httpd.timeout = 1  # 设置超时，以便可以检查server_running
+            
+            print("服务器已启动，等待连接...")
+            
+            while server_running:
+                try:
+                    httpd.handle_request()
+                except socket.timeout:
+                    # 超时是正常的，继续循环
+                    continue
+                except KeyboardInterrupt:
+                    break
+                except Exception as e:
+                    if server_running:
+                        print(f"处理请求时出错: {e}")
+                        continue
+                    else:
+                        break
+            
+            print("服务器已停止")
+            
     except Exception as e:
         print(f"启动失败: {e}")
+    finally:
+        print("服务已退出")
 
 if __name__ == "__main__":
     main()
