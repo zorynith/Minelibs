@@ -359,11 +359,11 @@ class UniversalProxyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 def get_target_url():
     """获取用户输入的代理目标网址"""
     print("=" * 60)
-    print("   Cloud Shell 完整资源代理服务")
+    print("   HTTP代理服务")
     print("=" * 60)
     
     while True:
-        url = input("请输入要代理的完整网址 (例如: https://me.bendy.eu.org): ").strip()
+        url = input("请输入要代理的完整网址: ").strip()
         
         if not url:
             print("错误: 网址不能为空，请重新输入")
