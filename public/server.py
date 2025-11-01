@@ -8,7 +8,11 @@ import zlib
 
 class UniversalProxyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        self.target_url = kwargs.pop('target_url')
+        # 从类属性获取目标URL，而不是从kwargs
+        self.target_url = getattr(self.__class__, 'target_url', '')
+        if not self.target_url:
+            raise ValueError("目标URL未设置")
+            
         self.target_base = urllib.parse.urlparse(self.target_url)
         self.target_domain = self.target_base.netloc
         self.target_scheme = self.target_base.scheme
@@ -139,7 +143,6 @@ class UniversalProxyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         # 只重写明显的URL字符串，避免破坏代码逻辑
         target_domain_escaped = re.escape(self.target_domain)
         
-        # 匹配字符串中的完整URL
         def replace_js_url(match):
             url_part = match.group(2).replace("\\", "")
             new_url = self.rewrite_url(url_part, current_path)
@@ -390,11 +393,11 @@ def main():
     target_url = get_target_url()
     PORT = 60000
     
-    # 创建自定义处理类
+    # 创建自定义处理类并设置类属性
     class Handler(UniversalProxyHTTPRequestHandler):
         pass
     
-    # 设置目标URL
+    # 设置类属性，而不是实例属性
     Handler.target_url = target_url
     
     try:
