@@ -9,6 +9,9 @@ import socketserver
 import urllib.request
 import gzip
 import io
+import sys
+import os
+import time
 
 class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
     # 重写send_error方法以支持UTF-8编码
@@ -46,7 +49,6 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             """
             self.wfile.write(error_content.encode('utf-8'))
         except Exception as e:
-            # 如果连错误页面都发送失败，至少记录错误
             print(f"发送错误页面失败: {e}")
 
     def do_GET(self):
@@ -57,11 +59,6 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             # 如果URL为空，显示主页
             if not url:
                 self.show_homepage()
-                return
-                
-            # 如果是本地文件请求
-            if url.startswith('local/'):
-                self.serve_local_file(url)
                 return
                 
             # 代理请求
@@ -358,36 +355,60 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
         """重写日志方法，使用UTF-8编码输出"""
         message = format % args
         try:
-            print(message)
+            print(f"[{self.client_address[0]}] {message}")
         except UnicodeEncodeError:
-            # 如果遇到编码问题，使用安全的编码方式
             safe_message = message.encode('utf-8', errors='replace').decode('utf-8')
-            print(safe_message)
+            print(f"[{self.client_address[0]}] {safe_message}")
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     """支持多线程的HTTP服务器"""
     daemon_threads = True
+    allow_reuse_address = True  # 允许地址重用
 
-def run_proxy_server(port=8080):
+def find_available_port(start_port=60000, max_attempts=10):
+    """查找可用的端口"""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            # 尝试绑定端口
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('', port))
+            sock.close()
+            return port
+        except OSError:
+            continue
+    return None
+
+def run_proxy_server(port=60000):
     """运行代理服务器"""
+    # 先尝试杀死占用端口的进程
     try:
-        server = ThreadedHTTPServer(('', port), ProxyRequestHandler)
-        print(f"🌐 代理服务器已启动在端口 {port}")
-        print(f"📱 请在浏览器中访问: http://localhost:{port}")
+        os.system(f"fuser -k {port}/tcp > /dev/null 2>&1")
+        time.sleep(1)  # 等待端口释放
+    except:
+        pass
+    
+    # 查找可用端口
+    available_port = find_available_port(port)
+    
+    if available_port is None:
+        print("❌ 找不到可用端口，请手动关闭占用端口的进程")
+        return
+    
+    try:
+        server = ThreadedHTTPServer(('', available_port), ProxyRequestHandler)
+        print(f"🌐 代理服务器已启动在端口 {available_port}")
+        print(f"📱 请在浏览器中访问: http://localhost:{available_port}")
         print("⏹️  要停止服务器，请按 Ctrl+C")
         
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n🛑 服务器正在关闭...")
         server.shutdown()
+        server.server_close()
     except Exception as e:
         print(f"❌ 启动服务器时出错: {e}")
 
 if __name__ == '__main__':
-    # 设置默认端口
-    PORT = 8080
-    
-    # 可以在这里修改端口
-    # PORT = 60000
-    
-    run_proxy_server(PORT)
+    # 在Cloud Shell中使用端口60000
+    run_proxy_server(60000)
