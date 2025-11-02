@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Simple HTTP Proxy Browser (Compatible version for Python 3.6+)
+Simple HTTP Proxy Browser
+Compatible with Python 3.6+
 Port: 60000
 """
 
@@ -27,6 +28,7 @@ def join_url(base, link):
     except Exception:
         return link
 
+# JS injection for proxying links, forms, fetch/XHR
 INJECT_JS = """
 (function(){
     function toProxyUrl(u){
