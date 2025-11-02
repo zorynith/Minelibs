@@ -2,19 +2,20 @@
 # -*- coding: utf-8 -*-
 """
 proxy_browser.py
-Python 本地代理 + 简易浏览器外观
+兼容旧版 Python 的本地代理 + 简易浏览器外观
 端口: 60000
 """
 
 import sys
 import threading
 import urllib.parse
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 import requests
 from bs4 import BeautifulSoup
 import traceback
 
-# PyQt imports
+# PyQt imports (如果在无 GUI 的服务器上运行，请不要启动 GUI)
 from PyQt5 import QtWidgets
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import QApplication, QLineEdit, QToolBar, QAction, QMainWindow
@@ -24,7 +25,7 @@ LISTEN_ADDR = "127.0.0.1"
 LISTEN_PORT = 60000
 PROXY_BASE = f"http://{LISTEN_ADDR}:{LISTEN_PORT}"
 
-# ==================== 工具函数 ====================
+# Utility
 def quote_url(u: str) -> str:
     return urllib.parse.quote_plus(u)
 
@@ -37,7 +38,7 @@ def join_url(base, link):
     except Exception:
         return link
 
-# ==================== 注入的 JS ====================
+# JS to inject
 INJECT_JS = r"""
 (function(){
     function toProxyUrl(u){
@@ -95,7 +96,13 @@ INJECT_JS = r"""
 """.replace("%PROXY_BASE%", PROXY_BASE).replace("%PORT%", str(LISTEN_PORT))
 
 
-# ==================== HTTP 代理服务 ====================
+# Backwards-compatible Threading HTTPServer
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    # allow_reuse_address could be set if desired:
+    allow_reuse_address = True
+
+# HTTP handler (same logic as before)
 class SimpleProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -142,7 +149,6 @@ class SimpleProxyHandler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self.send_error(500, "Internal error")
 
-    # 修复版主页
     def serve_index(self):
         html = """<!doctype html>
 <html>
@@ -195,16 +201,19 @@ class SimpleProxyHandler(BaseHTTPRequestHandler):
             self.send_error(502, f"Bad Gateway when contacting {target_url}: {e}")
             return
 
-        self.send_response(resp.status_code)
-        excluded = ['Transfer-Encoding', 'Connection', 'Content-Encoding',
-                    'Keep-Alive', 'Proxy-Authenticate', 'Proxy-Authorization',
-                    'TE', 'Trailer', 'Upgrade']
-        content_type = resp.headers.get('Content-Type','')
-        for k,v in resp.headers.items():
-            if k not in excluded:
-                self.send_header(k, v)
+        try:
+            self.send_response(resp.status_code)
+            excluded = ['Transfer-Encoding', 'Connection', 'Content-Encoding',
+                        'Keep-Alive', 'Proxy-Authenticate', 'Proxy-Authorization',
+                        'TE', 'Trailer', 'Upgrade']
+            content_type = resp.headers.get('Content-Type','')
+            for k,v in resp.headers.items():
+                if k not in excluded:
+                    self.send_header(k, v)
+        except Exception:
+            pass
 
-        if 'text/html' in content_type or 'application/xhtml+xml' in content_type:
+        if 'text/html' in (content_type := resp.headers.get('Content-Type','')).lower() or 'application/xhtml+xml' in content_type.lower():
             try:
                 content = resp.content
                 encoding = resp.encoding if resp.encoding else 'utf-8'
@@ -241,7 +250,7 @@ class SimpleProxyHandler(BaseHTTPRequestHandler):
                                         parts.append(prox + desc)
                                     t[attr] = ", ".join(parts)
                                     continue
-                                if not val.strip():
+                                if not str(val).strip():
                                     full = base_url
                                 else:
                                     full = join_url(base_url, val)
@@ -265,19 +274,26 @@ class SimpleProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 traceback.print_exc()
 
-        self.send_header("Content-Length", resp.headers.get('Content-Length',''))
-        self.end_headers()
-        for chunk in resp.iter_content(chunk_size=8192):
-            if chunk:
-                self.wfile.write(chunk)
+        # fallback: stream binary content
+        try:
+            cl = resp.headers.get('Content-Length')
+            if cl:
+                self.send_header("Content-Length", cl)
+            self.end_headers()
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    self.wfile.write(chunk)
+        except Exception:
+            traceback.print_exc()
 
-# ==================== 启动代理线程 ====================
+
+# Start server thread
 def start_proxy_server():
     server = ThreadingHTTPServer((LISTEN_ADDR, LISTEN_PORT), SimpleProxyHandler)
     print(f"代理服务器运行中：http://{LISTEN_ADDR}:{LISTEN_PORT}/")
     server.serve_forever()
 
-# ==================== PyQt 浏览器 ====================
+# PyQt GUI
 class ProxyBrowserWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -356,7 +372,6 @@ class ProxyBrowserWindow(QMainWindow):
         except Exception:
             self.url_edit.setText(qurl.toString())
 
-# ==================== 主入口 ====================
 def main():
     server_thread = threading.Thread(target=start_proxy_server, daemon=True)
     server_thread.start()
