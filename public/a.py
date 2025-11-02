@@ -14,12 +14,11 @@ import os
 import time
 import ssl
 import select
+import re
 
 class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # 使用类变量来跟踪当前会话
-        self.session_data = {}
 
     def send_error(self, code, message=None, explain=None):
         try:
@@ -85,66 +84,36 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            # 获取URL路径
             path = self.path
             
-            # 如果URL为空或是根路径，显示主页
             if path == '/' or not path:
                 self.show_homepage()
                 return
             
-            # 处理favicon请求
             if path == '/favicon.ico':
                 self.send_error(404, "Favicon not found")
                 return
             
             print(f"Request path: {path}")
             
-            # 解析URL参数
-            parsed_path = urllib.parse.urlparse(path)
-            query_params = urllib.parse.parse_qs(parsed_path.query)
-            
-            # 检查是否有当前网站的cookie
-            current_site = self.headers.get('Cookie', '').replace('current_site=', '')
-            
-            # 如果是代理路径格式 (/proxy/url)
+            # 解析路径
             if path.startswith('/proxy/'):
+                # 代理模式：/proxy/https://www.baidu.com
                 url = path[7:]  # 去掉 /proxy/ 前缀
                 url = urllib.parse.unquote(url)
                 print(f"Proxy URL: {url}")
-                self.proxy_request(url, set_cookie=True)
-                return
-            
-            # 如果是直接访问的URL
-            if len(path) > 1 and not path.startswith('/proxy/'):
+                self.proxy_request(url)
+            else:
+                # 直接模式：/www.baidu.com
                 url = path[1:]  # 去掉开头的 /
                 url = urllib.parse.unquote(url)
                 
-                # 检查是否是相对路径（如百度搜索路径）
                 if not url.startswith(('http://', 'https://')):
-                    # 如果有当前网站的cookie，使用它作为基础URL
-                    if current_site:
-                        base_url = current_site
-                        if not base_url.endswith('/') and not url.startswith('/'):
-                            full_url = base_url + '/' + url
-                        else:
-                            full_url = base_url + url
-                        print(f"Relative path, using cookie base: {base_url}")
-                        print(f"Full URL: {full_url}")
-                        self.proxy_request(full_url, set_cookie=False)
-                        return
-                    else:
-                        # 没有基础URL，显示错误
-                        self.show_url_help(url)
-                        return
+                    url = 'https://' + url
                 
-                # 完整的URL，直接代理
-                print(f"Full URL request: {url}")
-                self.proxy_request(url, set_cookie=True)
-                return
+                print(f"Direct URL: {url}")
+                self.proxy_request(url)
                 
-            self.send_error(404, "Page not found")
-            
         except Exception as e:
             print(f"Error processing GET request: {e}")
             self.send_error(500, f"Server error: {str(e)}")
@@ -336,98 +305,7 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             print(f"Error showing homepage: {e}")
             self.send_error(500, f"Error showing homepage: {str(e)}")
 
-    def show_url_help(self, bad_url):
-        try:
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.end_headers()
-            
-            help_page = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title>URL Format Error</title>
-                <style>
-                    body {{ 
-                        font-family: Arial, sans-serif; 
-                        margin: 40px; 
-                        background-color: #f5f5f5;
-                    }}
-                    .container {{
-                        max-width: 800px;
-                        margin: 0 auto;
-                        background: white;
-                        padding: 30px;
-                        border-radius: 10px;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                    }}
-                    .home-button {{
-                        display: inline-block;
-                        padding: 10px 20px;
-                        background: #007cba;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 5px;
-                        margin-top: 20px;
-                    }}
-                    .home-button:hover {{
-                        background: #005a87;
-                    }}
-                    .warning {{
-                        background: #fff3cd;
-                        border: 1px solid #ffeaa7;
-                        padding: 15px;
-                        border-radius: 5px;
-                        margin: 20px 0;
-                    }}
-                    .fixed-home-button {{
-                        position: fixed;
-                        top: 20px;
-                        right: 20px;
-                        padding: 10px 20px;
-                        background: #007cba;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 5px;
-                        z-index: 1000;
-                        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-                    }}
-                </style>
-            </head>
-            <body>
-                <a href="/" class="fixed-home-button">Home</a>
-                
-                <div class="container">
-                    <h1>URL Format Error</h1>
-                    
-                    <div class="warning">
-                        <strong>Cannot process your URL:</strong> {bad_url}
-                    </div>
-                    
-                    <p>This appears to be a relative URL from a website. Please start from the homepage and enter a full domain name.</p>
-                    
-                    <p>Please enter URLs in this format:</p>
-                    <ul>
-                        <li><code>www.baidu.com</code></li>
-                        <li><code>github.com</code></li>
-                        <li><code>www.bilibili.com</code></li>
-                    </ul>
-                    
-                    <p>System will automatically add <code>https://</code> prefix</p>
-                    
-                    <a href="/" class="home-button">Return to Home</a>
-                </div>
-            </body>
-            </html>
-            """
-            self.wfile.write(help_page.encode('utf-8'))
-            
-        except Exception as e:
-            print(f"Error showing URL help: {e}")
-            self.send_error(500, f"Error showing URL help: {str(e)}")
-
-    def proxy_request(self, url, set_cookie=False):
+    def proxy_request(self, url):
         try:
             print(f"Proxying: {url}")
             
@@ -435,16 +313,22 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             if not url.startswith(('http://', 'https://')):
                 url = 'https://' + url
             
+            # 解析URL获取基础信息
+            parsed_url = urllib.parse.urlparse(url)
+            base_domain = parsed_url.netloc
+            base_url = f"{parsed_url.scheme}://{base_domain}"
+            
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
                 'Accept-Encoding': 'gzip, deflate',
                 'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
+                'Upgrade-Insecure-Requests': '1',
+                'Host': base_domain  # 重要：设置正确的Host头
             }
             
-            # 添加原始请求头
+            # 添加原始请求头（排除一些不需要的）
             for key, value in self.headers.items():
                 key_lower = key.lower()
                 if key_lower not in ['host', 'connection', 'accept-encoding', 'content-length', 'cookie']:
@@ -466,40 +350,41 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
                 if response.headers.get('Content-Encoding') == 'gzip':
                     content = gzip.decompress(content)
                 
-                # 获取基础URL用于重写相对链接
-                parsed_url = urllib.parse.urlparse(url)
-                base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                
-                # 在所有HTML页面中插入返回首页按钮和重写链接
+                # 获取内容类型
                 content_type = response.headers.get('Content-Type', '').lower()
+                
+                # 处理HTML内容
                 if 'text/html' in content_type:
-                    # 重写相对链接为绝对链接
-                    content = self.rewrite_links(content, base_url)
+                    # 重写页面中的所有链接
+                    content = self.rewrite_html_links(content, base_url)
                     
                     # 插入返回首页按钮
-                    home_button = b'''
-                    <div style="position:fixed;top:10px;right:10px;z-index:10000;background:white;padding:5px;border-radius:5px;box-shadow:0 2px 10px rgba(0,0,0,0.2);">
-                        <a href="/" style="display:block;padding:8px 15px;background:#007cba;color:white;text-decoration:none;border-radius:3px;font-family:Arial,sans-serif;font-size:14px;">Home</a>
-                    </div>
-                    '''
-                    
-                    # 在body标签开始后插入按钮
-                    body_start = content.find(b'<body')
-                    if body_start != -1:
-                        body_end = content.find(b'>', body_start) + 1
-                        content = content[:body_end] + home_button + content[body_end:]
+                    content = self.add_home_button(content)
+                
+                # 处理CSS内容
+                elif 'text/css' in content_type:
+                    content = self.rewrite_css_urls(content, base_url)
                 
                 # 发送响应头
                 self.send_response(response.getcode())
                 
-                # 设置cookie来跟踪当前网站
-                if set_cookie:
-                    self.send_header('Set-Cookie', f'current_site={base_url}')
-                
-                # 复制响应头
+                # 复制响应头，但移除或修改一些可能引起问题的头
                 for key, value in response.headers.items():
                     key_lower = key.lower()
-                    if key_lower not in ['content-encoding', 'transfer-encoding', 'connection', 'content-length', 'set-cookie']:
+                    
+                    # 移除可能引起问题的头
+                    if key_lower in ['content-security-policy', 'x-frame-options', 'x-content-type-options']:
+                        continue
+                    
+                    # 修改内容类型
+                    if key_lower == 'content-type':
+                        if 'text/html' in value.lower():
+                            self.send_header('Content-Type', 'text/html; charset=utf-8')
+                        elif 'text/css' in value.lower():
+                            self.send_header('Content-Type', 'text/css; charset=utf-8')
+                        else:
+                            self.send_header(key, value)
+                    else:
                         self.send_header(key, value)
                 
                 self.send_header('Content-Length', str(len(content)))
@@ -521,54 +406,119 @@ class ProxyRequestHandler(http.server.BaseHTTPRequestHandler):
             print(f"Proxy request error: {e}")
             self.send_error(500, f"Proxy request error: {str(e)}")
 
-    def rewrite_links(self, content, base_url):
-        """重写HTML中的相对链接为绝对链接"""
+    def rewrite_html_links(self, content, base_url):
+        """重写HTML中的所有链接"""
         try:
             # 将字节内容转换为字符串
             html_content = content.decode('utf-8', errors='ignore')
             
+            # 获取基础域名
+            parsed_base = urllib.parse.urlparse(base_url)
+            base_domain = parsed_base.netloc
+            
             # 重写各种类型的链接
-            import re
+            patterns = [
+                # href 属性
+                (r'href="/([^"]*)"', f'href="/proxy/{base_url}/\\1"'),
+                (r'href="//([^"]*)"', f'href="/proxy/https://\\1"'),
+                (r'href="http://([^"]*)"', f'href="/proxy/http://\\1"'),
+                (r'href="https://([^"]*)"', f'href="/proxy/https://\\1"'),
+                
+                # src 属性
+                (r'src="/([^"]*)"', f'src="/proxy/{base_url}/\\1"'),
+                (r'src="//([^"]*)"', f'src="/proxy/https://\\1"'),
+                (r'src="http://([^"]*)"', f'src="/proxy/http://\\1"'),
+                (r'src="https://([^"]*)"', f'src="/proxy/https://\\1"'),
+                
+                # action 属性（表单）
+                (r'action="/([^"]*)"', f'action="/proxy/{base_url}/\\1"'),
+                (r'action="//([^"]*)"', f'action="/proxy/https://\\1"'),
+                (r'action="http://([^"]*)"', f'action="/proxy/http://\\1"'),
+                (r'action="https://([^"]*)"', f'action="/proxy/https://\\1"'),
+                
+                # meta refresh
+                (r'content="\d+;url=/([^"]*)"', f'content="0;url=/proxy/{base_url}/\\1"'),
+                (r'content="\d+;url=//([^"]*)"', f'content="0;url=/proxy/https://\\1"'),
+                (r'content="\d+;url=http://([^"]*)"', f'content="0;url=/proxy/http://\\1"'),
+                (r'content="\d+;url=https://([^"]*)"', f'content="0;url=/proxy/https://\\1"'),
+            ]
             
-            # 重写 href 属性
-            html_content = re.sub(
-                r'href="/([^"]*)"',
-                f'href="/proxy/{base_url}/\\1"',
-                html_content
-            )
+            for pattern, replacement in patterns:
+                html_content = re.sub(pattern, replacement, html_content)
             
-            # 重写以 // 开头的协议相对URL
-            html_content = re.sub(
-                r'href="//([^"]*)"',
-                f'href="/proxy/https://\\1"',
-                html_content
-            )
+            # 重写JavaScript中的URL（简单处理）
+            js_patterns = [
+                (r'location\.href\s*=\s*"/([^"]*)"', f'location.href = "/proxy/{base_url}/\\1"'),
+                (r'location\.href\s*=\s*"//([^"]*)"', f'location.href = "/proxy/https://\\1"'),
+                (r'window\.location\s*=\s*"/([^"]*)"', f'window.location = "/proxy/{base_url}/\\1"'),
+                (r'window\.location\s*=\s*"//([^"]*)"', f'window.location = "/proxy/https://\\1"'),
+            ]
             
-            # 重写相对路径（不以/开头）
-            html_content = re.sub(
-                r'href="([^"/][^"]*)"',
-                f'href="/proxy/{base_url}/\\1"',
-                html_content
-            )
-            
-            # 重写 action 属性（表单）
-            html_content = re.sub(
-                r'action="/([^"]*)"',
-                f'action="/proxy/{base_url}/\\1"',
-                html_content
-            )
-            
-            # 重写 src 属性
-            html_content = re.sub(
-                r'src="/([^"]*)"',
-                f'src="/proxy/{base_url}/\\1"',
-                html_content
-            )
+            for pattern, replacement in js_patterns:
+                html_content = re.sub(pattern, replacement, html_content)
             
             return html_content.encode('utf-8')
             
         except Exception as e:
-            print(f"Error rewriting links: {e}")
+            print(f"Error rewriting HTML links: {e}")
+            return content
+
+    def rewrite_css_urls(self, content, base_url):
+        """重写CSS中的URL"""
+        try:
+            # 将字节内容转换为字符串
+            css_content = content.decode('utf-8', errors='ignore')
+            
+            # 重写CSS中的url()引用
+            patterns = [
+                # 相对路径
+                (r'url\("/([^"]*)"\)', f'url("/proxy/{base_url}/\\1")'),
+                (r'url\(\'/([^\']*)\'\)', f'url(\'/proxy/{base_url}/\\1\')'),
+                (r'url\(/([^)]*)\)', f'url(/proxy/{base_url}/\\1)'),
+                
+                # 协议相对路径
+                (r'url\("//([^"]*)"\)', f'url("/proxy/https://\\1")'),
+                (r'url\(\'//([^\']*)\'\)', f'url(\'/proxy/https://\\1\')'),
+                (r'url\(//([^)]*)\)', f'url(/proxy/https://\\1)'),
+                
+                # 绝对路径
+                (r'url\("http://([^"]*)"\)', f'url("/proxy/http://\\1")'),
+                (r'url\("https://([^"]*)"\)', f'url("/proxy/https://\\1")'),
+                (r'url\(\'http://([^\']*)\'\)', f'url(\'/proxy/http://\\1\')'),
+                (r'url\(\'https://([^\']*)\'\)', f'url(\'/proxy/https://\\1\')'),
+            ]
+            
+            for pattern, replacement in patterns:
+                css_content = re.sub(pattern, replacement, css_content)
+            
+            return css_content.encode('utf-8')
+            
+        except Exception as e:
+            print(f"Error rewriting CSS URLs: {e}")
+            return content
+
+    def add_home_button(self, content):
+        """在所有HTML页面中添加返回首页按钮"""
+        try:
+            html_content = content.decode('utf-8', errors='ignore')
+            
+            # 创建返回首页按钮的HTML
+            home_button = '''
+            <div id="proxy-home-button" style="position:fixed;top:10px;right:10px;z-index:10000;background:rgba(255,255,255,0.9);padding:5px;border-radius:5px;box-shadow:0 2px 10px rgba(0,0,0,0.2);border:1px solid #ccc;">
+                <a href="/" style="display:block;padding:8px 15px;background:#007cba;color:white;text-decoration:none;border-radius:3px;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">Home</a>
+            </div>
+            '''
+            
+            # 在body标签开始后插入按钮
+            body_start = html_content.find('<body')
+            if body_start != -1:
+                body_end = html_content.find('>', body_start) + 1
+                html_content = html_content[:body_end] + home_button + html_content[body_end:]
+            
+            return html_content.encode('utf-8')
+            
+        except Exception as e:
+            print(f"Error adding home button: {e}")
             return content
 
     def log_message(self, format, *args):
