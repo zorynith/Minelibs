@@ -9,7 +9,7 @@ import http.server
 import socketserver
 import urllib.parse
 import requests
-from bsoup import BeautifulSoup
+from bs4 import BeautifulSoup  # 修正了导入错误
 import re
 import time
 
