@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-HTTP代理服务器 - 完整修复版
+HTTP代理服务器 - 360搜索乱码修复版
 运行端口: 60000
-修复乱码、下载文件和412错误问题
+专门修复360搜索乱码问题
 """
 
 import http.server
 import socketserver
 import urllib.parse
 import requests
-from bs4 import BeautifulSoup
+from bsup4 import BeautifulSoup
 import re
 import time
 import chardet
 
-class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
-    """完整修复的代理处理器 - 修复乱码、下载文件和412错误"""
+class SoComFixProxyHandler(http.server.BaseHTTPRequestHandler):
+    """专门修复360搜索乱码的代理处理器"""
 
     config = {
         'port': 60000,
@@ -131,16 +131,126 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
             self._handle_non_200_response(response, target_url)
             return
         
-        content_type = response.headers.get('Content-Type', '').lower()
-        if 'text/html' in content_type:
-            rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(rewritten_content)))
-            self.end_headers()
-            self.wfile.write(rewritten_content)
+        # 特殊处理360搜索
+        if 'so.com' in target_url:
+            rewritten_content = self._rewrite_so_com_content(response, target_url)
         else:
-            self._proxy_raw_content(response)
+            content_type = response.headers.get('Content-Type', '').lower()
+            if 'text/html' in content_type:
+                rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
+            else:
+                self._proxy_raw_content(response)
+                return
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(rewritten_content)))
+        self.end_headers()
+        self.wfile.write(rewritten_content)
+
+    def _rewrite_so_com_content(self, response, base_url):
+        """专门重写360搜索内容 - 修复乱码问题"""
+        print("检测到360搜索页面，使用专门处理")
+        
+        # 360搜索通常使用GBK编码
+        try:
+            # 先尝试GBK编码
+            html_content = response.content.decode('gbk', errors='replace')
+            print("使用GBK编码解码成功")
+        except UnicodeDecodeError:
+            try:
+                # 如果GBK失败，尝试GB2312
+                html_content = response.content.decode('gb2312', errors='replace')
+                print("使用GB2312编码解码成功")
+            except UnicodeDecodeError:
+                try:
+                    # 如果GB2312失败，尝试UTF-8
+                    html_content = response.content.decode('utf-8', errors='replace')
+                    print("使用UTF-8编码解码成功")
+                except UnicodeDecodeError:
+                    # 最后使用chardet检测
+                    detected = chardet.detect(response.content)
+                    encoding = detected.get('encoding', 'utf-8')
+                    print(f"使用chardet检测编码: {encoding}")
+                    html_content = response.content.decode(encoding, errors='replace')
+        
+        # 使用BeautifulSoup解析并重写
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+        except Exception as e:
+            print(f"BeautifulSoup解析错误: {e}, 使用宽松解析")
+            soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # 导航栏HTML
+        nav_html = '''
+        <div style="background: #007cba; color: white; padding: 10px; margin: 0; text-align: center; position: fixed; top: 0; left: 0; right: 0; z-index: 10000;">
+            <a href="/" style="color: white; text-decoration: none; font-weight: bold; margin-right: 15px;">🏠 返回代理主页</a>
+            <span>当前代理: {}</span>
+        </div>
+        '''.format(base_url[:50] + '...' if len(base_url) > 50 else base_url)
+
+        # 重写链接
+        self._rewrite_links_complete(soup, base_url)
+
+        # 重写CSS中的url()引用
+        style_tags = soup.find_all('style')
+        for style_tag in style_tags:
+            if style_tag.string:
+                style_tag.string = self._rewrite_css_urls(style_tag.string, base_url)
+
+        # 确保有正确的字符集声明
+        head_tag = soup.find('head')
+        if head_tag:
+            # 移除现有的charset声明
+            for meta in head_tag.find_all('meta', attrs={'charset': True}):
+                meta.decompose()
+            for meta in head_tag.find_all('meta', attrs={'http-equiv': lambda x: x and x.lower() == 'content-type'}):
+                meta.decompose()
+            
+            # 添加UTF-8 charset声明
+            new_meta = soup.new_tag('meta', charset='utf-8')
+            head_tag.insert(0, new_meta)
+        else:
+            # 如果没有head标签，创建一个
+            head_tag = soup.new_tag('head')
+            soup.insert(0, head_tag)
+            new_meta = soup.new_tag('meta', charset='utf-8')
+            head_tag.insert(0, new_meta)
+
+        # 插入导航栏并添加顶部边距
+        body_tag = soup.find('body')
+        if body_tag:
+            # 为body添加顶部边距以容纳固定导航栏
+            body_style = body_tag.get('style', '')
+            if 'margin-top' not in body_style:
+                body_tag['style'] = body_style + '; margin-top: 50px;' if body_style else 'margin-top: 50px;'
+            
+            nav_soup = BeautifulSoup(nav_html, 'html.parser')
+            body_tag.insert(0, nav_soup.div)
+        else:
+            # 如果没有body标签，创建一个并插入导航栏
+            body_tag = soup.new_tag('body')
+            body_tag['style'] = 'margin-top: 50px;'
+            nav_soup = BeautifulSoup(nav_html, 'html.parser')
+            body_tag.append(nav_soup.div)
+            
+            # 将原有内容移动到body中
+            for content in soup.contents:
+                if content.name != 'body':
+                    body_tag.append(content)
+            soup.append(body_tag)
+
+        # 注入增强的JavaScript拦截代码
+        interception_script = self._get_enhanced_interception_script(base_url)
+        script_tag = soup.new_tag('script')
+        script_tag.string = interception_script
+        if body_tag:
+            body_tag.append(script_tag)
+        else:
+            soup.append(script_tag)
+
+        # 返回UTF-8编码的字节串
+        return str(soup).encode('utf-8')
 
     def _get_enhanced_headers(self, target_url):
         """获取增强的请求头 - 修复412错误"""
@@ -170,7 +280,7 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
         <!DOCTYPE html>
         <html>
         <head>
-            <title>完整修复代理 - 60000端口</title>
+            <title>360搜索乱码修复代理 - 60000端口</title>
             <meta charset="utf-8">
             <style>
                 body { 
@@ -225,9 +335,9 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
         </head>
         <body>
             <div class="container">
-                <h1>🌐 完整修复代理服务</h1>
+                <h1>🌐 360搜索乱码修复代理</h1>
                 <div class="info">
-                    <strong>修复内容：</strong> 同时解决新闻直接跳转、搜索问题、下载文件、412错误和乱码问题。
+                    <strong>修复内容：</strong> 专门解决360搜索乱码问题，同时保持其他修复。
                 </div>
                 <form action="/proxy" method="GET">
                     <div class="form-group">
@@ -236,7 +346,7 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
                     <button type="submit">开始代理访问</button>
                 </form>
                 <div style="margin-top: 20px; text-align: center; color: #666;">
-                    <small>代理服务运行在端口 60000 | 已修复乱码、下载文件和412错误</small>
+                    <small>代理服务运行在端口 60000 | 已修复360搜索乱码问题</small>
                 </div>
             </div>
         </body>
@@ -274,17 +384,22 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
             self._handle_non_200_response(response, target_url)
             return
 
-        content_type = response.headers.get('Content-Type', '').lower()
-        if 'text/html' in content_type:
-            # 使用编码感知的重写函数
-            rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(rewritten_content)))
-            self.end_headers()
-            self.wfile.write(rewritten_content)
+        # 特殊处理360搜索
+        if 'so.com' in target_url:
+            rewritten_content = self._rewrite_so_com_content(response, target_url)
         else:
-            self._proxy_raw_content(response)
+            content_type = response.headers.get('Content-Type', '').lower()
+            if 'text/html' in content_type:
+                rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
+            else:
+                self._proxy_raw_content(response)
+                return
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(rewritten_content)))
+        self.end_headers()
+        self.wfile.write(rewritten_content)
 
     def _rewrite_html_content_with_encoding(self, response, base_url):
         """带编码处理的HTML内容重写 - 修复乱码问题"""
@@ -375,6 +490,7 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
                 
                 # 返回HTML重定向页面而不是直接重定向
                 redirect_html = f'''
+                <!DOCTYPE html>
                 <html>
                 <head>
                     <title>重定向中</title>
@@ -579,7 +695,11 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
             # 正常处理200响应
             content_type = response.headers.get('Content-Type', '').lower()
             if 'text/html' in content_type:
-                rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
+                # 特殊处理360搜索
+                if 'so.com' in target_url:
+                    rewritten_content = self._rewrite_so_com_content(response, target_url)
+                else:
+                    rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.send_header('Content-Length', str(len(rewritten_content)))
@@ -867,10 +987,10 @@ def run_proxy_server():
     except:
         pass
     
-    with socketserver.TCPServer(("", port), CompleteFixProxyHandler) as httpd:
-        print("🚀 完整修复代理服务器已启动在端口 " + str(port))
+    with socketserver.TCPServer(("", port), SoComFixProxyHandler) as httpd:
+        print("🚀 360搜索乱码修复代理服务器已启动在端口 " + str(port))
         print("📧 访问地址: http://localhost:" + str(port))
-        print("🔧 修复内容: 乱码问题 + 新闻直接跳转 + 搜索问题 + 下载文件 + 412错误")
+        print("🔧 修复内容: 360搜索乱码 + 新闻直接跳转 + 搜索问题 + 下载文件 + 412错误")
         print("⏹️ 按 Ctrl+C 停止服务器")
         
         try:
