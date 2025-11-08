@@ -2,7 +2,7 @@
 """
 HTTP代理服务器 - 完整修复版
 运行端口: 60000
-修复下载文件和412错误问题
+修复乱码、下载文件和412错误问题
 """
 
 import http.server
@@ -12,9 +12,10 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import time
+import chardet
 
 class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
-    """完整修复的代理处理器 - 修复下载文件和412错误"""
+    """完整修复的代理处理器 - 修复乱码、下载文件和412错误"""
 
     config = {
         'port': 60000,
@@ -132,12 +133,12 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
         
         content_type = response.headers.get('Content-Type', '').lower()
         if 'text/html' in content_type:
-            rewritten_content = self._rewrite_html_content_complete(response.text, target_url)
+            rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(rewritten_content.encode('utf-8'))))
+            self.send_header('Content-Length', str(len(rewritten_content)))
             self.end_headers()
-            self.wfile.write(rewritten_content.encode('utf-8'))
+            self.wfile.write(rewritten_content)
         else:
             self._proxy_raw_content(response)
 
@@ -226,7 +227,7 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
             <div class="container">
                 <h1>🌐 完整修复代理服务</h1>
                 <div class="info">
-                    <strong>修复内容：</strong> 同时解决新闻直接跳转、搜索问题、下载文件和412错误。
+                    <strong>修复内容：</strong> 同时解决新闻直接跳转、搜索问题、下载文件、412错误和乱码问题。
                 </div>
                 <form action="/proxy" method="GET">
                     <div class="form-group">
@@ -235,7 +236,7 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
                     <button type="submit">开始代理访问</button>
                 </form>
                 <div style="margin-top: 20px; text-align: center; color: #666;">
-                    <small>代理服务运行在端口 60000 | 已修复下载文件和412错误</small>
+                    <small>代理服务运行在端口 60000 | 已修复乱码、下载文件和412错误</small>
                 </div>
             </div>
         </body>
@@ -249,7 +250,7 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(homepage_html.encode('utf-8'))
 
     def _proxy_webpage_enhanced(self):
-        """增强的网页代理 - 修复下载文件和412错误"""
+        """增强的网页代理 - 修复乱码、下载文件和412错误"""
         query_params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         target_url = query_params.get('url', [''])[0]
 
@@ -275,14 +276,89 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
 
         content_type = response.headers.get('Content-Type', '').lower()
         if 'text/html' in content_type:
-            rewritten_content = self._rewrite_html_content_complete(response.text, target_url)
+            # 使用编码感知的重写函数
+            rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(rewritten_content.encode('utf-8'))))
+            self.send_header('Content-Length', str(len(rewritten_content)))
             self.end_headers()
-            self.wfile.write(rewritten_content.encode('utf-8'))
+            self.wfile.write(rewritten_content)
         else:
             self._proxy_raw_content(response)
+
+    def _rewrite_html_content_with_encoding(self, response, base_url):
+        """带编码处理的HTML内容重写 - 修复乱码问题"""
+        # 检测原始编码
+        original_encoding = self._detect_encoding(response)
+        print(f"检测到编码: {original_encoding}")
+        
+        try:
+            # 使用正确编码解码内容
+            if original_encoding:
+                html_content = response.content.decode(original_encoding, errors='replace')
+            else:
+                # 如果无法检测编码，尝试常见编码
+                for encoding in ['utf-8', 'gbk', 'gb2312', 'iso-8859-1']:
+                    try:
+                        html_content = response.content.decode(encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    # 所有编码都失败，使用replace模式
+                    html_content = response.content.decode('utf-8', errors='replace')
+        except Exception as e:
+            print(f"解码错误: {e}, 使用replace模式")
+            html_content = response.content.decode('utf-8', errors='replace')
+        
+        return self._rewrite_html_content_complete(html_content, base_url)
+
+    def _detect_encoding(self, response):
+        """检测响应内容的编码"""
+        # 首先检查Content-Type头中的编码
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'charset=' in content_type:
+            charset_match = re.search(r'charset=([^\s;]+)', content_type)
+            if charset_match:
+                encoding = charset_match.group(1)
+                print(f"从Content-Type检测到编码: {encoding}")
+                return encoding
+        
+        # 检查HTML meta标签中的编码
+        try:
+            # 只检查前2000字节来检测meta标签
+            content_preview = response.content[:2000]
+            soup = BeautifulSoup(content_preview, 'html.parser')
+            meta_charset = soup.find('meta', attrs={'charset': True})
+            if meta_charset:
+                encoding = meta_charset.get('charset')
+                print(f"从meta charset检测到编码: {encoding}")
+                return encoding
+            
+            meta_content_type = soup.find('meta', attrs={'http-equiv': re.compile('content-type', re.I)})
+            if meta_content_type and meta_content_type.get('content'):
+                content_value = meta_content_type.get('content')
+                if 'charset=' in content_value.lower():
+                    charset_match = re.search(r'charset=([^\s;]+)', content_value, re.I)
+                    if charset_match:
+                        encoding = charset_match.group(1)
+                        print(f"从meta http-equiv检测到编码: {encoding}")
+                        return encoding
+        except Exception as e:
+            print(f"解析meta标签错误: {e}")
+        
+        # 使用chardet检测编码
+        try:
+            detected = chardet.detect(response.content)
+            if detected['confidence'] > 0.7:
+                encoding = detected['encoding']
+                print(f"chardet检测到编码: {encoding} (置信度: {detected['confidence']})")
+                return encoding
+        except Exception as e:
+            print(f"chardet检测错误: {e}")
+        
+        print("无法检测编码，使用utf-8")
+        return 'utf-8'
 
     def _handle_non_200_response(self, response, target_url):
         """处理非200状态码的响应 - 修复下载文件问题"""
@@ -303,6 +379,7 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
                 <head>
                     <title>重定向中</title>
                     <meta http-equiv="refresh" content="0;url={proxy_location}">
+                    <meta charset="utf-8">
                 </head>
                 <body>
                     <p>正在重定向... <a href="{proxy_location}">点击这里</a> 如果页面没有自动跳转。</p>
@@ -329,9 +406,11 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
         """生成错误页面HTML"""
         if status_code == 412:
             return f'''
+            <!DOCTYPE html>
             <html>
             <head>
                 <title>412错误 - 代理访问被拒绝</title>
+                <meta charset="utf-8">
                 <style>
                     body {{ font-family: Arial, sans-serif; margin: 40px; }}
                     .error-container {{ max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; }}
@@ -362,9 +441,11 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
             '''
         else:
             return f'''
+            <!DOCTYPE html>
             <html>
             <head>
                 <title>{status_code}错误</title>
+                <meta charset="utf-8">
                 <style>
                     body {{ font-family: Arial, sans-serif; margin: 40px; }}
                     .error-container {{ max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; }}
@@ -470,10 +551,12 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
                     
                     # 返回HTML重定向页面而不是直接重定向
                     redirect_html = f'''
+                    <!DOCTYPE html>
                     <html>
                     <head>
                         <title>重定向中</title>
                         <meta http-equiv="refresh" content="0;url={proxy_location}">
+                        <meta charset="utf-8">
                     </head>
                     <body>
                         <p>正在重定向... <a href="{proxy_location}">点击这里</a> 如果页面没有自动跳转。</p>
@@ -496,12 +579,12 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
             # 正常处理200响应
             content_type = response.headers.get('Content-Type', '').lower()
             if 'text/html' in content_type:
-                rewritten_content = self._rewrite_html_content_complete(response.text, target_url)
+                rewritten_content = self._rewrite_html_content_with_encoding(response, target_url)
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
-                self.send_header('Content-Length', str(len(rewritten_content.encode('utf-8'))))
+                self.send_header('Content-Length', str(len(rewritten_content)))
                 self.end_headers()
-                self.wfile.write(rewritten_content.encode('utf-8'))
+                self.wfile.write(rewritten_content)
             else:
                 self._proxy_raw_content(response)
             
@@ -524,7 +607,11 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def _rewrite_html_content_complete(self, html_content, base_url):
         """完整的HTML内容重写 - 同时修复新闻跳转和搜索"""
-        soup = BeautifulSoup(html_content, 'html.parser')
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+        except Exception as e:
+            print(f"BeautifulSoup解析错误: {e}, 使用宽松解析")
+            soup = BeautifulSoup(html_content, 'html.parser')
 
         nav_html = '''
         <div style="background: #007cba; color: white; padding: 10px; margin: 0; text-align: center; position: fixed; top: 0; left: 0; right: 0; z-index: 10000;">
@@ -541,6 +628,25 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
         for style_tag in style_tags:
             if style_tag.string:
                 style_tag.string = self._rewrite_css_urls(style_tag.string, base_url)
+
+        # 确保有正确的字符集声明
+        head_tag = soup.find('head')
+        if head_tag:
+            # 移除现有的charset声明
+            for meta in head_tag.find_all('meta', attrs={'charset': True}):
+                meta.decompose()
+            for meta in head_tag.find_all('meta', attrs={'http-equiv': lambda x: x and x.lower() == 'content-type'}):
+                meta.decompose()
+            
+            # 添加UTF-8 charset声明
+            new_meta = soup.new_tag('meta', charset='utf-8')
+            head_tag.insert(0, new_meta)
+        else:
+            # 如果没有head标签，创建一个
+            head_tag = soup.new_tag('head')
+            soup.insert(0, head_tag)
+            new_meta = soup.new_tag('meta', charset='utf-8')
+            head_tag.insert(0, new_meta)
 
         # 插入导航栏并添加顶部边距
         body_tag = soup.find('body')
@@ -574,7 +680,8 @@ class CompleteFixProxyHandler(http.server.BaseHTTPRequestHandler):
         else:
             soup.append(script_tag)
 
-        return str(soup)
+        # 返回UTF-8编码的字节串
+        return str(soup).encode('utf-8')
 
     def _rewrite_links_complete(self, soup, base_url):
         """完整的链接重写 - 修复新闻跳转，保护返回主页链接"""
@@ -763,7 +870,7 @@ def run_proxy_server():
     with socketserver.TCPServer(("", port), CompleteFixProxyHandler) as httpd:
         print("🚀 完整修复代理服务器已启动在端口 " + str(port))
         print("📧 访问地址: http://localhost:" + str(port))
-        print("🔧 修复内容: 新闻直接跳转 + 搜索问题 + 下载文件 + 412错误")
+        print("🔧 修复内容: 乱码问题 + 新闻直接跳转 + 搜索问题 + 下载文件 + 412错误")
         print("⏹️ 按 Ctrl+C 停止服务器")
         
         try:
