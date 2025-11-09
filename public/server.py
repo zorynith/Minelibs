@@ -1,437 +1,777 @@
+#!/usr/bin/env python3
+"""
+HTTP代理服务器
+运行端口: 60000
+修复必应搜索变360和主页重复代理问题
+"""
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import http.server
 import socketserver
-import urllib.request
 import urllib.parse
+import requests
+from bsup4 import BeautifulSoup
 import re
-import gzip
-import zlib
+import time
+import json
 
-class UniversalProxyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        # 从类属性获取目标URL，而不是从kwargs
-        self.target_url = getattr(self.__class__, 'target_url', '')
-        if not self.target_url:
-            raise ValueError("目标URL未设置")
-            
-        self.target_base = urllib.parse.urlparse(self.target_url)
-        self.target_domain = self.target_base.netloc
-        self.target_scheme = self.target_base.scheme
-        super().__init__(*args, **kwargs)
-    
-    def rewrite_content(self, content, content_type, current_path=""):
-        """根据内容类型重写内容中的URL"""
-        if not content:
-            return content
-            
-        # 解码内容
-        try:
-            decoded_content = content.decode('utf-8')
-        except (UnicodeDecodeError, AttributeError):
-            # 如果不是文本内容，直接返回
-            return content
-        
-        # HTML重写
-        if 'text/html' in content_type:
-            return self.rewrite_html_content(decoded_content, current_path).encode('utf-8')
-        
-        # CSS重写
-        elif 'text/css' in content_type:
-            return self.rewrite_css_content(decoded_content, current_path).encode('utf-8')
-        
-        # JavaScript重写（谨慎处理）
-        elif 'javascript' in content_type or content_type.endswith('/javascript'):
-            return self.rewrite_js_content(decoded_content, current_path).encode('utf-8')
-        
-        # SVG重写（SVG内可能包含链接）
-        elif 'image/svg+xml' in content_type:
-            return self.rewrite_svg_content(decoded_content, current_path).encode('utf-8')
-        
-        # 其他文本类型（如XML等）
-        elif content_type.startswith('text/'):
-            return self.rewrite_generic_text_content(decoded_content, current_path).encode('utf-8')
-        
-        # 非文本内容不重写
-        else:
-            return content
-    
-    def rewrite_html_content(self, html_content, current_path=""):
-        """重写HTML内容中的所有资源引用"""
-        # 重写各种HTML属性
-        patterns = [
-            # 标准属性
-            (r'href=(["\'])(.*?)\1', 'href'),
-            (r'src=(["\'])(.*?)\1', 'src'),
-            (r'action=(["\'])(.*?)\1', 'action'),
-            (r'background=(["\'])(.*?)\1', 'background'),
-            (r'poster=(["\'])(.*?)\1', 'poster'),
-            (r'cite=(["\'])(.*?)\1', 'cite'),
-            (r'data=(["\'])(.*?)\1', 'data'),
-            (r'formaction=(["\'])(.*?)\1', 'formaction'),
-            (r'icon=(["\'])(.*?)\1', 'icon'),
-            (r'manifest=(["\'])(.*?)\1', 'manifest'),
-            (r'archive=(["\'])(.*?)\1', 'archive'),
-            
-            # CSS相关
-            (r'style=(["\'])(.*?)\1', 'style'),
-            
-            # 元标签
-            (r'content=(["\'])(.*?)\1', 'content'),
-        ]
-        
-        for pattern, attr_type in patterns:
-            def replace_match(match):
-                if attr_type == 'style':
-                    # 处理内联样式
-                    style_content = match.group(2)
-                    # 重写style中的url()
-                    style_content = re.sub(
-                        r'url\((["\']?)(.*?)(["\']?)\)',
-                        lambda m: f'url({m.group(1)}{self.rewrite_url(m.group(2).strip(), current_path)}{m.group(3)})',
-                        style_content
-                    )
-                    return f'style={match.group(1)}{style_content}{match.group(1)}'
-                else:
-                    url = match.group(2)
-                    new_url = self.rewrite_url(url, current_path)
-                    return f'{attr_type}={match.group(1)}{new_url}{match.group(1)}'
-            
-            html_content = re.sub(pattern, replace_match, html_content, flags=re.IGNORECASE)
-        
-        # 处理srcset属性（特殊格式）
-        srcset_pattern = r'srcset=(["\'])(.*?)\1'
-        def replace_srcset(match):
-            srcset_content = match.group(2)
-            parts = re.split(r',\s*', srcset_content)
-            new_parts = []
-            for part in parts:
-                if part.strip():
-                    if ' ' in part:
-                        url_descriptor = part.split(' ', 1)
-                        url = url_descriptor[0].strip()
-                        descriptor = url_descriptor[1].strip()
-                        new_url = self.rewrite_url(url, current_path)
-                        new_parts.append(f'{new_url} {descriptor}')
-                    else:
-                        new_url = self.rewrite_url(part.strip(), current_path)
-                        new_parts.append(new_url)
-            return f'srcset={match.group(1)}{", ".join(new_parts)}{match.group(1)}'
-        
-        html_content = re.sub(srcset_pattern, replace_srcset, html_content, flags=re.IGNORECASE)
-        
-        return html_content
-    
-    def rewrite_css_content(self, css_content, current_path=""):
-        """重写CSS内容中的所有URL"""
-        # 重写url()函数
-        css_content = re.sub(
-            r'url\((["\']?)(.*?)(["\']?)\)',
-            lambda m: f'url({m.group(1)}{self.rewrite_url(m.group(2).strip(), current_path)}{m.group(3)})',
-            css_content
-        )
-        
-        # 重写@import规则
-        css_content = re.sub(
-            r'@import\s+(["\'])(.*?)\1',
-            lambda m: f'@import {m.group(1)}{self.rewrite_url(m.group(2).strip(), current_path)}{m.group(1)}',
-            css_content
-        )
-        
-        return css_content
-    
-    def rewrite_js_content(self, js_content, current_path=""):
-        """重写JavaScript内容中的URL（谨慎处理）"""
-        # 只重写明显的URL字符串，避免破坏代码逻辑
-        target_domain_escaped = re.escape(self.target_domain)
-        
-        def replace_js_url(match):
-            url_part = match.group(2).replace("\\", "")
-            new_url = self.rewrite_url(url_part, current_path)
-            return f'{match.group(1)}{new_url}{match.group(3)}'
-        
-        js_content = re.sub(
-            rf'(["\'])(https?:\\?/\\?/{target_domain_escaped}[^"\']*?)(["\'])',
-            replace_js_url,
-            js_content
-        )
-        
-        # 匹配字符串中的相对路径（以/开头）
-        def replace_js_relative(match):
-            new_url = self.rewrite_url(match.group(2), current_path)
-            return f'{match.group(1)}{new_url}{match.group(3)}'
-        
-        js_content = re.sub(
-            r'(["\'])(\/[^"\']*?)(["\'])',
-            replace_js_relative,
-            js_content
-        )
-        
-        return js_content
-    
-    def rewrite_svg_content(self, svg_content, current_path=""):
-        """重写SVG内容中的链接"""
-        # SVG中可能包含xlink:href等属性
-        patterns = [
-            (r'xlink:href=(["\'])(.*?)\1', 'xlink:href'),
-            (r'href=(["\'])(.*?)\1', 'href'),
-        ]
-        
-        for pattern, attr_type in patterns:
-            svg_content = re.sub(
-                pattern,
-                lambda m: f'{attr_type}={m.group(1)}{self.rewrite_url(m.group(2), current_path)}{m.group(1)}',
-                svg_content
-            )
-        
-        # 重写SVG中的样式
-        svg_content = re.sub(
-            r'style=(["\'])(.*?)\1',
-            lambda m: f'style={m.group(1)}{self.rewrite_css_content(m.group(2), current_path)}{m.group(1)}',
-            svg_content
-        )
-        
-        return svg_content
-    
-    def rewrite_generic_text_content(self, text_content, current_path=""):
-        """重写通用文本内容中的URL"""
-        # 重写明显的URL模式
-        target_domain_escaped = re.escape(self.target_domain)
-        
-        def replace_text_url(match):
-            url_part = match.group(0).replace("\\", "")
-            return self.rewrite_url(url_part, current_path)
-        
-        text_content = re.sub(
-            rf'https?:\\?/\\?/{target_domain_escaped}[^\s<>"\'\)]*',
-            replace_text_url,
-            text_content
-        )
-        
-        return text_content
-    
-    def rewrite_url(self, url, current_path=""):
-        """重写单个URL"""
-        if not url or url.startswith(('data:', 'javascript:', 'mailto:', 'tel:', '#')):
-            return url
-        
-        # 解析当前请求路径
-        if current_path.startswith('/proxy/'):
-            base_path = current_path[7:]  # 移除'/proxy/'前缀
-        else:
-            base_path = current_path
-        
-        # 解析URL
-        parsed = urllib.parse.urlparse(url)
-        
-        # 处理不同类型的URL
-        if parsed.netloc:  # 绝对URL
-            if self.target_domain in parsed.netloc:
-                # 目标域名的资源 - 重写为代理URL
-                path = parsed.path
-                if parsed.query:
-                    path += f"?{parsed.query}"
-                if parsed.fragment:
-                    path += f"#{parsed.fragment}"
-                return f"/proxy/{path.lstrip('/')}"
-            else:
-                # 外部资源 - 保持原样
-                return url
-        elif url.startswith('//'):  # 协议相对URL
-            absolute_url = f"{self.target_scheme}:{url}"
-            return self.rewrite_url(absolute_url, current_path)
-        elif url.startswith('/'):  # 根相对路径
-            return f"/proxy/{url.lstrip('/')}"
-        else:  # 文档相对路径
-            # 构建基于当前路径的绝对路径
-            if base_path and not base_path.startswith('/'):
-                base_path = f"/{base_path}"
-            
-            base_dir = '/'.join(base_path.split('/')[:-1]) if '/' in base_path else ''
-            if base_dir:
-                absolute_path = f"/{base_dir}/{url}"
-            else:
-                absolute_path = f"/{url}"
-            
-            # 规范化路径
-            absolute_path = re.sub(r'/+/', '/', absolute_path)
-            return f"/proxy/{absolute_path.lstrip('/')}"
-    
+class FixedProxyHandler(http.server.BaseHTTPRequestHandler):
+    """修复的代理处理器"""
+
+    config = {
+        'port': 60000,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'timeout': 30
+    }
+
     def do_GET(self):
-        # 记录请求
-        print(f"收到请求: {self.path}")
-        
-        # 处理代理路径
-        if self.path.startswith('/proxy/'):
-            original_path = self.path[7:]  # 移除'/proxy/'前缀
-            target_full_url = f"{self.target_url.rstrip('/')}/{original_path.lstrip('/')}"
-            current_path = self.path
-        elif self.path == '/':
-            target_full_url = self.target_url
-            current_path = self.path
-        else:
-            target_full_url = f"{self.target_url.rstrip('/')}{self.path}"
-            current_path = self.path
-        
-        print(f"代理到: {target_full_url}")
-        
+        """处理GET请求"""
         try:
-            # 设置请求头
-            headers = {
-                'Host': self.target_domain,
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
+            print(f"请求: {self.path}")
+            
+            if self.path == '/':
+                self._serve_homepage()
+            elif self.path.startswith('/proxy?url='):
+                self._proxy_webpage()
+            elif self.path.startswith('/proxy?') and 'url=' not in self.path:
+                self._handle_search_result()
+            else:
+                self._proxy_resource()
+        except Exception as e:
+            self.send_error(500, f"Server Error: {str(e)}")
+
+    def do_POST(self):
+        """处理POST请求"""
+        try:
+            if self.path.startswith('/proxy?url='):
+                self._proxy_post_request()
+            else:
+                self.send_error(404, "Not Found")
+        except Exception as e:
+            self.send_error(500, f"Server Error: {str(e)}")
+
+    def _proxy_webpage(self):
+        """代理网页"""
+        query_params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        target_url = query_params.get('url', [''])[0]
+
+        if not target_url:
+            self.send_error(400, "Missing URL parameter")
+            return
+
+        if not target_url.startswith(('http://', 'https://')):
+            target_url = 'http://' + target_url
+
+        print(f"目标URL: {target_url}")
+
+        headers = self._get_headers(target_url)
+
+        try:
+            response = requests.get(target_url, headers=headers, timeout=self.config['timeout'], verify=False)
+        except requests.exceptions.RequestException as e:
+            self.send_error(502, f"Failed to fetch: {str(e)}")
+            return
+
+        if response.status_code != 200:
+            self._handle_response_error(response, target_url)
+            return
+
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' in content_type:
+            rewritten_content = self._rewrite_html(response.text, target_url)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(rewritten_content.encode('utf-8'))))
+            self.end_headers()
+            self.wfile.write(rewritten_content.encode('utf-8'))
+        else:
+            self._proxy_raw_content(response)
+
+    def _get_headers(self, url):
+        """获取请求头"""
+        headers = {
+            'User-Agent': self.config['user_agent'],
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+
+        # 为特定网站设置Referer
+        if 'bilibili.com' in url:
+            headers['Referer'] = 'https://www.bilibili.com/'
+            headers['Origin'] = 'https://www.bilibili.com'
+        elif 'so.com' in url:
+            headers['Referer'] = 'https://www.so.com/'
+        elif 'bing.com' in url:
+            headers['Referer'] = 'https://www.bing.com/'
+        else:
+            headers['Referer'] = url
+            
+        return headers
+
+    def _rewrite_html(self, html_content, base_url):
+        """重写HTML内容"""
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+        except Exception as e:
+            print(f"HTML解析错误: {e}")
+            return self._create_basic_page(html_content, base_url)
+
+        # 添加导航栏
+        self._add_navigation(soup, base_url)
+
+        # 重写所有链接和资源
+        self._rewrite_all_links(soup, base_url)
+
+        # 特殊处理哔哩哔哩
+        if 'bilibili.com' in base_url:
+            self._fix_bilibili_issues(soup)
+
+        # 注入拦截脚本
+        self._inject_interception_script(soup)
+
+        # 确保字符集
+        self._ensure_charset(soup)
+
+        return str(soup)
+
+    def _create_basic_page(self, content, base_url):
+        """创建基础页面"""
+        return f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>代理页面</title>
+            <style>
+                body {{ margin-top: 50px; font-family: Arial, sans-serif; }}
+                .nav {{ background: #007cba; color: white; padding: 10px; position: fixed; top: 0; left: 0; right: 0; z-index: 10000; text-align: center; }}
+            </style>
+        </head>
+        <body>
+            <div class="nav">
+                <a href="/" style="color: white; text-decoration: none; font-weight: bold;">返回主页</a>
+                <span style="margin-left: 15px;">代理: {base_url[:60] + '...' if len(base_url) > 60 else base_url}</span>
+            </div>
+            {content}
+        </body>
+        </html>
+        '''
+
+    def _add_navigation(self, soup, base_url):
+        """添加导航栏"""
+        # 使用特殊标记的主页链接，避免被重写
+        nav_html = f'''
+        <div style="background: #007cba; color: white; padding: 10px; margin: 0; text-align: center; position: fixed; top: 0; left: 0; right: 0; z-index: 10000;">
+            <a href="/" style="color: white; text-decoration: none; font-weight: bold;" data-no-proxy="true">返回主页</a>
+            <span style="margin-left: 15px;">代理: {base_url[:60] + '...' if len(base_url) > 60 else base_url}</span>
+        </div>
+        '''
+
+        body_tag = soup.find('body')
+        if body_tag:
+            body_style = body_tag.get('style', '')
+            if 'margin-top' not in body_style:
+                body_tag['style'] = body_style + '; margin-top: 50px;' if body_style else 'margin-top: 50px;'
+            
+            nav_soup = BeautifulSoup(nav_html, 'html.parser')
+            body_tag.insert(0, nav_soup.div)
+        else:
+            body_tag = soup.new_tag('body')
+            body_tag['style'] = 'margin-top: 50px;'
+            nav_soup = BeautifulSoup(nav_html, 'html.parser')
+            body_tag.append(nav_soup.div)
+            
+            for content in soup.contents:
+                if content.name != 'body':
+                    body_tag.append(content)
+            soup.append(body_tag)
+
+    def _rewrite_all_links(self, soup, base_url):
+        """重写所有链接和资源"""
+        # 重写普通链接 - 跳过有data-no-proxy标记的链接
+        for tag in soup.find_all('a', href=True):
+            if tag.get('data-no-proxy') == 'true':
+                continue
+                
+            href = tag['href']
+            if self._should_rewrite_url(href):
+                absolute_url = urllib.parse.urljoin(base_url, href)
+                tag['href'] = "/proxy?url=" + urllib.parse.quote(absolute_url)
+
+        # 重写表单
+        for form in soup.find_all('form', action=True):
+            action = form['action']
+            if self._should_rewrite_url(action):
+                absolute_url = urllib.parse.urljoin(base_url, action)
+                form['action'] = "/proxy?url=" + urllib.parse.quote(absolute_url)
+
+        # 重写所有资源
+        resource_tags = soup.find_all(['img', 'script', 'link', 'iframe', 'source', 'embed', 'object'], 
+                                    src=True) + soup.find_all('link', href=True)
+        
+        for tag in resource_tags:
+            src_attr = 'src' if tag.get('src') else 'href'
+            src = tag[src_attr]
+            if self._should_rewrite_url(src):
+                absolute_url = urllib.parse.urljoin(base_url, src)
+                tag[src_attr] = "/proxy?url=" + urllib.parse.quote(absolute_url)
+
+        # 重写CSS中的URL
+        style_tags = soup.find_all('style')
+        for style_tag in style_tags:
+            if style_tag.string:
+                style_tag.string = self._rewrite_css_urls(style_tag.string, base_url)
+
+        # 重写内联样式
+        for tag in soup.find_all(style=True):
+            style = tag['style']
+            tag['style'] = self._rewrite_css_urls(style, base_url)
+
+    def _fix_bilibili_issues(self, soup):
+        """修复哔哩哔哩问题"""
+        # 修复412错误：移除可能导致验证的脚本
+        for script in soup.find_all('script'):
+            script_content = script.string or ''
+            if '412' in script_content or 'precondition' in script_content.lower():
+                script.decompose()
+        
+        # 确保资源正确加载
+        for link in soup.find_all('link', rel='stylesheet'):
+            if link.get('href'):
+                link['href'] = link['href'] + '?t=' + str(int(time.time()))
+        
+        for script in soup.find_all('script', src=True):
+            if script['src'] and not script['src'].startswith('http'):
+                script['src'] = 'https:' + script['src'] if script['src'].startswith('//') else 'https://www.bilibili.com' + script['src']
+
+    def _inject_interception_script(self, soup):
+        """注入拦截脚本"""
+        interception_script = '''
+        // 修复的JavaScript拦截代码
+        (function() {
+            'use strict';
+            
+            // 拦截所有点击事件
+            function interceptClickEvent(e) {
+                var target = e.target;
+                
+                while (target && target !== document) {
+                    if (target.tagName && target.tagName.toLowerCase() === 'a' && target.href) {
+                        var href = target.href;
+                        
+                        // 检查是否是需要代理的链接 - 跳过有data-no-proxy标记的链接
+                        if (href && 
+                            !href.includes('/proxy?url=') && 
+                            !href.startsWith('javascript:') && 
+                            !href.startsWith('mailto:') && 
+                            !href.startsWith('tel:') && 
+                            !href.startsWith('#') &&
+                            !href.startsWith('data:') &&
+                            !target.hasAttribute('data-no-proxy')) {
+                            
+                            e.preventDefault();
+                            e.stopImmediatePropagation();
+                            e.stopPropagation();
+                            
+                            try {
+                                var proxyUrl = '/proxy?url=' + encodeURIComponent(href);
+                                window.location.href = proxyUrl;
+                            } catch (err) {
+                                console.log('拦截错误:', err);
+                            }
+                            return false;
+                        }
+                    }
+                    target = target.parentNode;
+                }
             }
             
-            # 添加Referer头（如果适用）
-            if current_path and current_path != '/':
-                referer_path = current_path.replace('/proxy/', '/')
-                headers['Referer'] = f"{self.target_url}{referer_path}"
+            // 多事件监听确保捕获所有点击
+            document.addEventListener('click', interceptClickEvent, true);
+            document.addEventListener('auxclick', interceptClickEvent, true);
             
-            # 创建请求
-            req = urllib.request.Request(target_full_url, headers=headers)
+            // 拦截表单提交
+            document.addEventListener('submit', function(e) {
+                var form = e.target;
+                if (form.tagName && form.tagName.toLowerCase() === 'form' && form.action) {
+                    var action = form.action;
+                    if (action && !action.includes('/proxy?url=')) {
+                        e.preventDefault();
+                        var proxyUrl = '/proxy?url=' + encodeURIComponent(action);
+                        
+                        // 创建隐藏表单进行提交
+                        var hiddenForm = document.createElement('form');
+                        hiddenForm.method = form.method || 'GET';
+                        hiddenForm.action = proxyUrl;
+                        hiddenForm.style.display = 'none';
+                        
+                        // 复制所有表单数据
+                        var inputs = form.querySelectorAll('input, select, textarea');
+                        for (var i = 0; i < inputs.length; i++) {
+                            var input = inputs[i];
+                            if (input.name) {
+                                var newInput = document.createElement('input');
+                                newInput.type = 'hidden';
+                                newInput.name = input.name;
+                                newInput.value = input.value;
+                                hiddenForm.appendChild(newInput);
+                            }
+                        }
+                        
+                        document.body.appendChild(hiddenForm);
+                        hiddenForm.submit();
+                    }
+                }
+            }, true);
             
-            # 发起请求
-            with urllib.request.urlopen(req, timeout=30) as response:
-                # 读取响应内容
-                content = response.read()
-                content_type = response.headers.get('Content-Type', '').lower()
+            console.log('拦截脚本已加载');
+        })();
+        '''
+        
+        script_tag = soup.new_tag('script')
+        script_tag.string = interception_script
+        
+        body_tag = soup.find('body')
+        if body_tag:
+            body_tag.append(script_tag)
+        else:
+            soup.append(script_tag)
+
+    def _ensure_charset(self, soup):
+        """确保字符集声明"""
+        head_tag = soup.find('head')
+        if not head_tag:
+            head_tag = soup.new_tag('head')
+            soup.insert(0, head_tag)
+        
+        # 添加UTF-8 charset声明
+        new_meta = soup.new_tag('meta', charset='utf-8')
+        head_tag.insert(0, new_meta)
+
+    def _should_rewrite_url(self, url):
+        """判断URL是否需要重写"""
+        if not url or url.strip() == '':
+            return False
+        if url.startswith(('#', 'javascript:', 'mailto:', 'tel:', 'data:', 'blob:')):
+            return False
+        if url.startswith(('/proxy?url=', '/resource/', 'http://localhost:', 'https://localhost:')):
+            return False
+        # 确保主页链接不会被重写
+        if url == '/' or url.startswith('/?'):
+            return False
+        return True
+
+    def _rewrite_css_urls(self, css_content, base_url):
+        """重写CSS中的url()引用"""
+        def replace_url(match):
+            url_content = match.group(1)
+            if url_content.startswith(('http://', 'https://', 'data:')):
+                return match.group(0)
+
+            absolute_url = urllib.parse.urljoin(base_url, url_content.strip('"\''))
+            proxy_url = "/proxy?url=" + urllib.parse.quote(absolute_url)
+            return 'url("' + proxy_url + '")'
+
+        pattern = r'url\(["\']?([^"\'()]*)["\']?\)'
+        return re.sub(pattern, replace_url, css_content)
+
+    def _handle_response_error(self, response, target_url):
+        """处理错误响应"""
+        status_code = response.status_code
+        
+        # 处理重定向
+        if status_code in [301, 302, 303, 307, 308]:
+            location = response.headers.get('Location', '')
+            if location:
+                if not location.startswith(('http://', 'https://')):
+                    location = urllib.parse.urljoin(target_url, location)
                 
-                # 处理压缩内容
-                content_encoding = response.headers.get('Content-Encoding', '').lower()
-                if 'gzip' in content_encoding:
-                    try:
-                        content = gzip.decompress(content)
-                    except (gzip.BadGzipFile, EOFError):
-                        pass
-                elif 'deflate' in content_encoding:
-                    try:
-                        content = zlib.decompress(content)
-                    except zlib.error:
-                        pass
+                proxy_location = "/proxy?url=" + urllib.parse.quote(location)
                 
-                # 重写内容（如果是文本类型）
-                content = self.rewrite_content(content, content_type, current_path)
+                redirect_html = f'''
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>重定向中</title>
+                    <meta http-equiv="refresh" content="0;url={proxy_location}">
+                    <meta charset="utf-8">
+                </head>
+                <body>
+                    <div style="background: #007cba; color: white; padding: 10px; text-align: center;">
+                        <a href="/" style="color: white; text-decoration: none; font-weight: bold;" data-no-proxy="true">返回主页</a>
+                    </div>
+                    <div style="text-align: center; margin-top: 50px;">
+                        <p>正在重定向... <a href="{proxy_location}">点击这里</a> 如果页面没有自动跳转。</p>
+                    </div>
+                </body>
+                </html>
+                '''
                 
-                # 发送响应
-                self.send_response(response.status)
-                
-                # 复制响应头
-                for key, value in response.headers.items():
-                    key_lower = key.lower()
-                    # 过滤不合适的头
-                    if key_lower not in ['connection', 'transfer-encoding', 'content-encoding', 
-                                       'content-length', 'strict-transport-security']:
-                        # 重写一些特定的头
-                        if key_lower == 'location':
-                            value = self.rewrite_url(value, current_path)
-                        self.send_header(key, value)
-                
-                # 更新内容长度
-                self.send_header('Content-Length', str(len(content)))
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(redirect_html.encode('utf-8'))))
                 self.end_headers()
+                self.wfile.write(redirect_html.encode('utf-8'))
+                return
+        
+        # 处理其他错误状态码
+        error_html = f'''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>{status_code}错误</title>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 0; }}
+                .nav {{ background: #007cba; color: white; padding: 10px; text-align: center; }}
+                .error-container {{ max-width: 600px; margin: 50px auto; padding: 20px; }}
+            </style>
+        </head>
+        <body>
+            <div class="nav">
+                <a href="/" style="color: white; text-decoration: none; font-weight: bold;" data-no-proxy="true">返回主页</a>
+            </div>
+            <div class="error-container">
+                <h1>代理访问遇到问题</h1>
+                <div>错误代码: {status_code}</div>
+                <p>目标网站返回了错误响应。</p>
+                <p><a href="/proxy?url={urllib.parse.quote(target_url)}">重新尝试访问此页面</a></p>
+            </div>
+        </body>
+        </html>
+        '''
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(error_html.encode('utf-8'))))
+        self.end_headers()
+        self.wfile.write(error_html.encode('utf-8'))
+
+    def _handle_search_result(self):
+        """处理搜索结果 - 修复必应变360问题"""
+        try:
+            parsed_path = urllib.parse.urlparse(self.path)
+            query_params = urllib.parse.parse_qs(parsed_path.query)
+            
+            print(f"搜索参数: {query_params}")
+            
+            referer = self.headers.get('Referer', '')
+            if referer and '/proxy?url=' in referer:
+                referer_parsed = urllib.parse.urlparse(referer)
+                referer_query = urllib.parse.parse_qs(referer_parsed.query)
+                base_search_url = referer_query.get('url', [''])[0]
                 
-                # 返回响应内容
-                self.wfile.write(content)
-                
-                print(f"代理成功: {response.status} - {len(content)} bytes - {content_type}")
-                
-        except urllib.error.HTTPError as e:
-            print(f"HTTP错误: {e.code} - {e.reason}")
-            self.send_error(e.code, f"Proxy HTTP Error: {e.reason}")
-        except urllib.error.URLError as e:
-            print(f"URL错误: {e.reason}")
-            self.send_error(502, f"Proxy URL Error: {e.reason}")
+                if base_search_url:
+                    # 关键修复：保持原始搜索引擎，不强制转换
+                    # 如果来源是必应，继续使用必应；如果是360，继续使用360
+                    if 'so.com' in base_search_url:
+                        search_result_url = "https://www.so.com/s"
+                    elif 'bing.com' in base_search_url:
+                        search_result_url = "https://www.bing.com/search"
+                    else:
+                        # 默认使用必应搜索，而不是360
+                        search_result_url = "https://www.bing.com/search"
+                    
+                    # 构建搜索URL
+                    if query_params:
+                        search_result_url += "?" + urllib.parse.urlencode(query_params, doseq=True)
+                    
+                    print(f"搜索请求将发送到: {search_result_url}")
+                    self._proxy_specific_url(search_result_url)
+                    return
+            
+            # 如果没有Referer，使用默认搜索
+            self._try_fix_search()
+            
         except Exception as e:
-            print(f"未知错误: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.send_error(500, f"Proxy Error: {str(e)}")
-    
+            print(f"搜索处理错误: {str(e)}")
+            self.send_error(500, f"Search processing error: {str(e)}")
+
+    def _try_fix_search(self):
+        """尝试修复搜索 - 修复默认使用360搜索的问题"""
+        try:
+            parsed_path = urllib.parse.urlparse(self.path)
+            query_params = urllib.parse.parse_qs(parsed_path.query)
+            
+            if 'q' in query_params or 'query' in query_params or 'keyword' in query_params:
+                # 关键修复：默认使用必应搜索，而不是360搜索
+                search_result_url = "https://www.bing.com/search"
+                
+                if query_params:
+                    search_result_url += "?" + urllib.parse.urlencode(query_params, doseq=True)
+                
+                print(f"修复搜索URL: {search_result_url}")
+                self._proxy_specific_url(search_result_url)
+                return
+            
+            self.send_error(400, "无法处理的搜索请求")
+            
+        except Exception as e:
+            print(f"搜索修复错误: {str(e)}")
+            self.send_error(500, f"Search fix error: {str(e)}")
+
+    def _proxy_specific_url(self, target_url):
+        """代理特定URL"""
+        print(f"代理URL: {target_url}")
+        
+        headers = self._get_headers(target_url)
+        
+        try:
+            response = requests.get(target_url, headers=headers, timeout=self.config['timeout'], verify=False)
+        except requests.exceptions.RequestException as e:
+            self.send_error(502, f"Failed to fetch: {str(e)}")
+            return
+        
+        if response.status_code != 200:
+            self._handle_response_error(response, target_url)
+            return
+        
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' in content_type:
+            rewritten_content = self._rewrite_html(response.text, target_url)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(rewritten_content.encode('utf-8'))))
+            self.end_headers()
+            self.wfile.write(rewritten_content.encode('utf-8'))
+        else:
+            self._proxy_raw_content(response)
+
+    def _proxy_post_request(self):
+        """处理POST请求"""
+        query_params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        target_url = query_params.get('url', [''])[0]
+        
+        if not target_url:
+            self.send_error(400, "Missing URL parameter")
+            return
+        
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length) if content_length > 0 else b''
+        
+        headers = self._get_headers(target_url)
+        headers['Content-Type'] = self.headers.get('Content-Type', 'application/x-www-form-urlencoded')
+        
+        try:
+            response = requests.post(target_url, data=post_data, headers=headers, 
+                                   timeout=self.config['timeout'], verify=False, allow_redirects=False)
+            
+            if response.status_code in [301, 302, 303, 307, 308]:
+                location = response.headers.get('Location', '')
+                if location:
+                    if not location.startswith(('http://', 'https://')):
+                        location = urllib.parse.urljoin(target_url, location)
+                    
+                    proxy_location = "/proxy?url=" + urllib.parse.quote(location)
+                    
+                    redirect_html = f'''
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>重定向中</title>
+                        <meta http-equiv="refresh" content="0;url={proxy_location}">
+                        <meta charset="utf-8">
+                    </head>
+                    <body>
+                        <div style="background: #007cba; color: white; padding: 10px; text-align: center;">
+                            <a href="/" style="color: white; text-decoration: none; font-weight: bold;" data-no-proxy="true">返回主页</a>
+                        </div>
+                        <div style="text-align: center; margin-top: 50px;">
+                            <p>正在重定向... <a href="{proxy_location}">点击这里</a> 如果页面没有自动跳转。</p>
+                        </div>
+                    </body>
+                    </html>
+                    '''
+                    
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/html; charset=utf-8')
+                    self.send_header('Content-Length', str(len(redirect_html.encode('utf-8'))))
+                    self.end_headers()
+                    self.wfile.write(redirect_html.encode('utf-8'))
+                    return
+            
+            if response.status_code != 200:
+                self._handle_response_error(response, target_url)
+                return
+                
+            content_type = response.headers.get('Content-Type', '').lower()
+            if 'text/html' in content_type:
+                rewritten_content = self._rewrite_html(response.text, target_url)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(rewritten_content.encode('utf-8'))))
+                self.end_headers()
+                self.wfile.write(rewritten_content.encode('utf-8'))
+            else:
+                self._proxy_raw_content(response)
+            
+        except requests.exceptions.RequestException as e:
+            self.send_error(502, f"Failed to POST: {str(e)}")
+
+    def _serve_homepage(self):
+        """提供主页"""
+        homepage_html = '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>代理服务 - 60000端口</title>
+            <meta charset="utf-8">
+            <style>
+                body { 
+                    font-family: Arial, sans-serif; 
+                    margin: 40px; 
+                    background: #f5f5f5;
+                }
+                .container { 
+                    max-width: 600px; 
+                    margin: 0 auto; 
+                    background: white; 
+                    padding: 30px; 
+                    border-radius: 10px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }
+                h1 { 
+                    color: #333; 
+                    text-align: center;
+                }
+                .form-group { 
+                    margin: 20px 0; 
+                }
+                input[type="url"] { 
+                    width: 100%; 
+                    padding: 12px; 
+                    border: 1px solid #ddd; 
+                    border-radius: 5px; 
+                    font-size: 16px;
+                    box-sizing: border-box;
+                }
+                button { 
+                    background: #007cba; 
+                    color: white; 
+                    border: none; 
+                    padding: 12px 24px; 
+                    border-radius: 5px; 
+                    cursor: pointer; 
+                    font-size: 16px;
+                    width: 100%;
+                }
+                button:hover { 
+                    background: #005a87; 
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>代理服务</h1>
+                <p>输入要访问的网址：</p>
+                
+                <form action="/proxy" method="GET">
+                    <div class="form-group">
+                        <input type="url" name="url" placeholder="https://www.example.com" required>
+                    </div>
+                    <button type="submit">开始访问</button>
+                </form>
+                
+                <div style="margin-top: 20px; text-align: center; color: #666;">
+                    <small>作者:HY</small>
+                </div>
+            </div>
+        </body>
+        </html>
+        '''
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(homepage_html.encode('utf-8'))))
+        self.end_headers()
+        self.wfile.write(homepage_html.encode('utf-8'))
+
+    def _proxy_resource(self):
+        """代理资源文件"""
+        referer = self.headers.get('Referer', '')
+
+        if '/proxy?url=' in referer:
+            referer_parsed = urllib.parse.urlparse(referer)
+            referer_query = urllib.parse.parse_qs(referer_parsed.query)
+            base_url = referer_query.get('url', [''])[0]
+
+            if base_url:
+                if self.path == '/':
+                    self._serve_homepage()
+                    return
+                    
+                resource_url = urllib.parse.urljoin(base_url, self.path)
+
+                headers = {
+                    'User-Agent': self.config['user_agent'],
+                    'Referer': base_url
+                }
+
+                try:
+                    response = requests.get(resource_url, headers=headers, timeout=15, verify=False)
+                    if response.status_code == 200:
+                        self._proxy_raw_content(response)
+                    else:
+                        self._send_empty_response()
+                    return
+                except requests.exceptions.RequestException:
+                    self._send_empty_response()
+                    return
+
+        if self.path == '/':
+            self._serve_homepage()
+            return
+            
+        self._send_empty_response()
+
+    def _send_empty_response(self):
+        """发送空响应"""
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/octet-stream')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
+    def _proxy_raw_content(self, response):
+        """代理原始内容"""
+        self.send_response(response.status_code)
+        
+        excluded_headers = ['content-encoding', 'transfer-encoding', 'content-length', 'connection']
+        for header, value in response.headers.items():
+            if header.lower() not in excluded_headers:
+                self.send_header(header, value)
+        
+        self.send_header('Content-Length', str(len(response.content)))
+        self.end_headers()
+        self.wfile.write(response.content)
+
     def log_message(self, format, *args):
         """自定义日志格式"""
-        message = format % args
-        print(f"访问日志: {message}")
+        print("[" + self.log_date_time_string() + "] " + format % args)
 
-
-def get_target_url():
-    """获取用户输入的代理目标网址"""
-    print("=" * 60)
-    print("   HTTP代理服务")
-    print("=" * 60)
-    
-    while True:
-        url = input("请输入要代理的完整网址: ").strip()
-        
-        if not url:
-            print("错误: 网址不能为空，请重新输入")
-            continue
-            
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-            print(f"提示: 自动添加 https:// 前缀: {url}")
-        
-        url_pattern = re.compile(
-            r'^https?://'  # http:// or https://
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain...
-            r'localhost|'  # localhost...
-            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
-            r'(?::\d+)?'  # optional port
-            r'(?:/?|[/?]\S+)$', re.IGNORECASE)
-        
-        if not url_pattern.match(url):
-            print("错误: 网址格式不正确，请重新输入")
-            continue
-            
-        print(f"成功: 目标网址已设置: {url}")
-        return url
-
-
-def main():
-    target_url = get_target_url()
-    PORT = 60000
-    
-    # 创建自定义处理类并设置类属性
-    class Handler(UniversalProxyHTTPRequestHandler):
-        pass
-    
-    # 设置类属性，而不是实例属性
-    Handler.target_url = target_url
+def run_proxy_server():
+    """运行代理服务器"""
+    port = 60000
     
     try:
-        with socketserver.TCPServer(("", PORT), Handler) as httpd:
-            print("\n" + "=" * 60)
-            print("完整资源代理服务已启动!")
-            print(f"监听端口: {PORT}")
-            print(f"代理目标: {target_url}")
-            print("支持的资源类型:")
-            print("  - HTML (href, src, action, style, data-* 等所有属性)")
-            print("  - CSS (url(), @import, 内联样式)")
-            print("  - JavaScript (字符串中的URL)")
-            print("  - SVG (xlink:href, 样式等)")
-            print("  - 图片 (img, srcset, 背景图)")
-            print("  - 字体 (CSS @font-face)")
-            print("  - 重定向 (Location头)")
-            print("=" * 60)
-            print("按 Ctrl+C 停止服务")
-            print("=" * 60)
-            
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except:
+        pass
+    
+    with socketserver.TCPServer(("", port), FixedProxyHandler) as httpd:
+        print("代理服务器已启动在端口 " + str(port))
+        print("访问地址: http://localhost:" + str(port))
+        print("按 Ctrl+C 停止服务器")
+        
+        try:
             httpd.serve_forever()
-            
-    except KeyboardInterrupt:
-        print("\n\n服务已停止")
-    except OSError as e:
-        if e.errno == 98:  # Address already in use
-            print(f"\n\n错误: 端口 {PORT} 已被占用，请使用其他端口")
-        else:
-            print(f"\n\n系统错误: {str(e)}")
-    except Exception as e:
-        print(f"\n\n启动失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-
+        except KeyboardInterrupt:
+            print("\n服务器已停止")
 
 if __name__ == "__main__":
-    main()
+    run_proxy_server()
