@@ -12,7 +12,7 @@ import http.server
 import socketserver
 import urllib.parse
 import requests
-from bsup4 import BeautifulSoup
+from bs4 import BeautifulSoup
 import re
 import time
 import json
