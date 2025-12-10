@@ -1,16 +1,14 @@
 import { defineConfig } from 'vitepress'
 import { withSidebar } from 'vitepress-sidebar';
 
-// https://vitepress.dev/reference/site-config
-export default defineConfig({
+const vitePressOptions = {
   title: "Minelibs",
   description: "A Minecraft Version Library",
-    head: [
+  head: [
     ['link', { rel: 'icon', href: '/favicon.ico' }],
     ['link', { rel: 'stylesheet', href: '/custom.css' }]
   ],
   themeConfig: {
-    // https://vitepress.dev/reference/default-theme-config
     logo: "/Logo.svg",
     siteTitle: false,
     nav: [
@@ -19,30 +17,6 @@ export default defineConfig({
       { text: 'Bedrock Edition', link: '/docs/bedrock-edition' },
       { text: 'Java Edition', link: '/docs/java-edition' }
     ],
-
-    sidebar: {
-      '/docs/': [
-        {
-          text: 'Minecraft Edition',
-          items: [
-            { text: 'Bedrock Edition', link: '/docs/bedrock-edition' },
-            { text: 'Pocket Edition', link: '/docs/pocket-edition' },
-            { text: 'Java Edition', link: '/docs/java-edition' }
-          ]
-        }
-      ],
-      '/versions/': [
-        {
-          text: 'Versions',
-          items: [
-            { text: '0.1', link: '/versions/0.1' },
-            { text: '0.2', link: '/versions/0.2' },
-            { text: '0.3', link: '/versions/0.3' }
-          ]
-        }
-      ]
-    },
-
     socialLinks: [
       { 
         icon: {
@@ -63,7 +37,6 @@ export default defineConfig({
         link: 'https://files.bendy.eu.org/Minecraft/Minecraft%20For%20iOS/'
       }
     ],
-
     search: {
       provider: "local",
       options: {
@@ -84,9 +57,16 @@ export default defineConfig({
         },
       },
     },
-
     footer: {
-      copyright: "Copyright@ 2025 Minelibs"
+      copyright: "Copyright&#64; 2025 Minelibs"
     }
   }
-})
+};
+
+const vitePressSidebarOptions = {
+  documentRootPath: '/',
+  collapsed: false,
+  capitalizeFirst: true
+};
+
+export default defineConfig(withSidebar(vitePressOptions, vitePressSidebarOptions));
