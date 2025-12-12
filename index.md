@@ -18,11 +18,11 @@ hero:
       link: /api-examples
 
 features:
-  - title: Feature A
-    details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
-  - title: Feature B
-    details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
-  - title: Feature C
-    details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
+  - title: One-Stop for All Versions
+    details: Download official APK, IPA, and APPX files for every major Minecraft release—Android, iOS, and Windows.
+  - title: Legacy & Latest, All Platforms
+    details: From the oldest playable builds to the newest updates, get verified installers for every device.
+  - title: Safe, Organized, Always Updated
+    details: Trusted APK & IPA sources with version details and changelogs. No clutter, just clean downloads.
 ---
 
