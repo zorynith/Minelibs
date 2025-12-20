@@ -9,7 +9,7 @@ const vitePressOptions = {
     ['link', { rel: 'stylesheet', href: '/custom.css' }]
   ],
   themeConfig: {
-    logo: "/Minelibs.png",
+    logo: "/Logo.svg",
     siteTitle: false,
     nav: [
       { text: 'Home', link: '/' },
