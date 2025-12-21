@@ -11,11 +11,14 @@ hero:
     alt: mc
   actions:
     - theme: brand
-      text: Bedrock Edition
-      link: /markdown-examples
+      text: Minecraft For Windows
+      link: https://files.minelibs.eu.org/Minecraft/Minecraft%20for%20Windows/
+    - theme: brand
+      text: Minecraft For Android
+      link: https://files.bendy.eu.org/Minecraft/Minecraft%20For%20Android/
     - theme: alt
-      text: Java Edition
-      link: /api-examples
+      text: Minecraft For iOS
+      link: https://files.bendy.eu.org/Minecraft/Minecraft%20For%20iOS/
 
 features:
   - title: One-Stop for All Versions
