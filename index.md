@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "Minelibs"
-  text: "A Version Library"
-  tagline: Minecraft
+  text: "The Minecraft Library"
+  tagline: All platforms. All versions. Clean downloads.
   image:
     src: /mc.svg
     alt: mc
