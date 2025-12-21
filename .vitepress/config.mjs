@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitepress'
 import { withSidebar } from 'vitepress-sidebar';
+import fs from 'fs';
 
 const vitePressOptions = {
   title: "Minelibs",
@@ -59,6 +60,31 @@ const vitePressOptions = {
     },
     footer: {
       copyright: "Copyright&#64; 2025 Minelibs"
+    }
+  },
+  
+  // 添加 sitemap 生成功能
+  async buildEnd(siteConfig) {
+    // 配置网站基础路径
+    const baseURL = 'https://minelibs.eu.org/';
+    let siteMapStr = '';
+    
+    // 确保 pages 数组存在
+    if (siteConfig.pages && Array.isArray(siteConfig.pages)) {
+      for (const page of siteConfig.pages) {
+        // 将 .md 后缀替换为 .html，并确保 URL 格式正确
+        const url = `${baseURL}${page.replace(/\.md$/, '.html')}`;
+        siteMapStr += `${url}\n`;
+      }
+    }
+    
+    // 生成文件
+    try {
+      const outputPath = `${siteConfig.outDir}/sitemap.txt`;
+      fs.writeFileSync(outputPath, siteMapStr);
+      console.log(`Sitemap generated at: ${outputPath}`);
+    } catch (err) {
+      console.error('Failed to create sitemap.txt:', err);
     }
   }
 };
