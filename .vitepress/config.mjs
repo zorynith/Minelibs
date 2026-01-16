@@ -3,7 +3,7 @@ import { withSidebar } from 'vitepress-sidebar';
 import fs from 'fs';
 
 const vitePressOptions = {
-  title: "Minelibs",
+  title: "Minelibs - Minecraft Library",
   description: "A Minecraft Version Library",
   head: [
     ['link', { rel: 'icon', href: '/favicon.ico' }],
