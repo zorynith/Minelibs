@@ -1,0 +1,77 @@
+/* 调整Logo大小 */
+:root {
+  --vp-nav-logo-height: 42px; /* 默认是30px */
+}
+
+/* 隐藏滚动条的同时仍能滚动 */
+.scroll-container {
+    overflow: auto; /* 启用滚动功能 */
+    -ms-overflow-style: none; /* 适用于 Internet Explorer 和旧版 Edge */
+    scrollbar-width: none; /* 适用于 Firefox */
+}
+
+/* Webkit 浏览器 */
+.scroll-container::-webkit-scrollbar {
+    display: none; /* 隐藏滚动条 */
+}
+
+/* 去除蓝色高亮 */
+button, button:focus, button:active, button::-moz-focus-inner {
+  outline: none !important;
+  box-shadow: none !important;
+}
+button::-moz-focus-inner {
+  border: 0 !important;
+}
+
+/* 全面去除 */
+button,
+button:focus,
+button:active,
+button:focus-visible,
+button:focus-within,
+input[type="button"],
+input[type="button"]:focus,
+input[type="button"]:active,
+input[type="button"]:focus-visible,
+input[type="button"]:focus-within,
+input[type="submit"],
+input[type="submit"]:focus,
+input[type="submit"]:active,
+input[type="submit"]:focus-visible,
+input[type="submit"]:focus-within,
+input[type="reset"],
+input[type="reset"]:focus,
+input[type="reset"]:active,
+input[type="reset"]:focus-visible,
+input[type="reset"]:focus-within,
+textarea:focus,
+textarea:active,
+textarea:focus-visible,
+textarea:focus-within,
+a[role="button"],
+a[role="button"]:focus,
+a[role="button"]:active,
+a[role="button"]:focus-visible,
+a[role="button"]:focus-within,
+[tabindex]:focus,
+[tabindex]:active,
+[tabindex]:focus-visible,
+[tabindex]:focus-within,
+.btn,
+.btn:focus,
+.btn:active,
+.btn:focus-visible,
+.btn:focus-within {
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  background: inherit !important;
+}
+
+a, a:focus, a:active {
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
