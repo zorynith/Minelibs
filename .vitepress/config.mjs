@@ -24,7 +24,7 @@ const vitePressOptions = {
     ['link', { rel: 'apple-touch-icon', sizes: '152x152', href: '/resources/apple-icon-152x152.png' }],
     ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/resources/apple-icon-180x180.png' }],
     
-    ['link', { rel: 'mask-icon', href: '/resources/safari-pinned-tab.svg', color: '#6ac969' }]
+    ['link', { rel: 'mask-icon', href: '/resources/safari-pinned-tab.svg', color: '#6ac969' }],
     ['meta', { name: 'theme-color', content: '#c8f3e5', media: '(prefers-color-scheme: light)' }],
     ['meta', { name: 'theme-color', content: '#33554b', media: '(prefers-color-scheme: dark)' }],
     ['meta', { name: 'msapplication-TileImage', content: '/resources/mstile-144x144.png' }],
