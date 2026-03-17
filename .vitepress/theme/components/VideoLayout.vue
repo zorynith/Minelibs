@@ -1,172 +1,194 @@
 <template>
-  <div class="app-container">
-    <!-- 顶部栏 -->
-    <header class="app-header">
-      <button class="nav-back" @click="goBack">← 返回</button>
+  <div class="video-app">
+    <!-- 毛玻璃导航栏 -->
+    <header class="glass-navbar">
+      <button class="nav-back" @click="goBack">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M20 11H7.83L13.42 5.41L12 4L4 12L12 20L13.41 18.59L7.83 13H20V11Z" fill="currentColor"/>
+        </svg>
+      </button>
       <div class="nav-logo">
         <img src="https://minelibs.eu.org/Minelibs.png" alt="Logo">
       </div>
-      <div class="nav-spacer"></div>
+      <div class="nav-placeholder"></div>
     </header>
 
-    <!-- 视频区域（粘性） -->
-    <section class="video-section" ref="videoSection">
-      <div class="video-box" :class="{ 'ratio-fixed': !videoMeta.ready }">
-        <!-- 加载状态 -->
-        <div v-if="!videoMeta.ready || videoMeta.buffering" class="video-overlay loading-state" @click.stop>
-          <div class="spinner"></div>
+    <!-- 视频卡片区域（粘性） -->
+    <section class="video-card" ref="videoCard">
+      <div class="video-container">
+        <!-- 16:9 视频包装器 -->
+        <div class="video-wrapper" :class="{ 'ratio-fixed': !videoMeta.ready }">
+          <!-- 加载动画 -->
+          <div v-if="!videoMeta.ready || videoMeta.buffering" class="video-overlay loading-overlay">
+            <div class="spinner"></div>
+          </div>
+          <!-- 错误提示 -->
+          <div v-if="videoMeta.error" class="video-overlay error-overlay">
+            <span>视频加载失败</span>
+          </div>
+          <video
+            ref="videoPlayer"
+            class="video-element"
+            :src="currentSource.url"
+            preload="metadata"
+            @timeupdate="onProgress"
+            @loadedmetadata="onMetaLoad"
+            @loadeddata="onDataLoad"
+            @waiting="onWait"
+            @playing="onPlay"
+            @error="onFail"
+            @dblclick="togglePlayback"
+            @mousedown="startLongPress"
+            @mouseup="endLongPress"
+            @mouseleave="cancelLongPress"
+            @click="handleClick"
+          ></video>
         </div>
-        <!-- 错误提示 -->
-        <div v-if="videoMeta.error" class="video-overlay error-state" @click.stop>
-          视频加载失败
-        </div>
-        <video
-          ref="videoPlayer"
-          class="video-element"
-          :src="currentSource.url"
-          preload="metadata"
-          @timeupdate="onProgress"
-          @loadedmetadata="onMetaLoad"
-          @loadeddata="onDataLoad"
-          @waiting="onWait"
-          @playing="onPlay"
-          @error="onFail"
-          @dblclick="togglePlayback"
-          @mousedown="startLongPress"
-          @mouseup="endLongPress"
-          @mouseleave="cancelLongPress"
-          @click="handleClick"
-        ></video>
+
+        <!-- 控制栏（毛玻璃效果） -->
+        <Transition name="fade">
+          <div v-if="panelVisible" class="control-bar" @mousedown.stop>
+            <!-- 进度条 -->
+            <div class="progress-area" @mousedown="startSeek">
+              <div class="progress-track">
+                <div class="buffer-progress" :style="{ width: bufferPercent + '%' }"></div>
+                <div class="play-progress" :style="{ width: playPercent + '%' }"></div>
+                <div
+                  class="progress-thumb"
+                  :class="{ dragging: seekActive }"
+                  :style="{ left: playPercent + '%' }"
+                  @mousedown.stop="startSeek"
+                ></div>
+              </div>
+            </div>
+
+            <!-- 控制按钮组 -->
+            <div class="control-group">
+              <!-- 播放/暂停 -->
+              <button
+                class="control-btn play-btn"
+                @click="togglePlayback"
+                @mouseenter="playHover = true"
+                @mouseleave="playHover = false"
+              >
+                <svg v-if="videoMeta.paused" width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path d="M8 5v14l11-7z" fill="currentColor" :class="{ 'hover-blue': playHover }"/>
+                </svg>
+                <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <rect x="6" y="5" width="4" height="14" fill="currentColor" :class="{ 'hover-blue': playHover }"/>
+                  <rect x="14" y="5" width="4" height="14" fill="currentColor" :class="{ 'hover-blue': playHover }"/>
+                </svg>
+              </button>
+
+              <span class="time-display">{{ formatTime(currentPos) }} / {{ formatTime(totalDuration) }}</span>
+
+              <div class="flex-spacer"></div>
+
+              <!-- 倍速菜单 -->
+              <div class="menu-wrapper" ref="speedMenu">
+                <button
+                  class="menu-trigger"
+                  :class="{ active: speedHover && !speedClick, clicked: speedClick }"
+                  @click="toggleSpeedMenu"
+                  @mouseenter="speedHover = true"
+                  @mouseleave="speedHover = false"
+                  @mousedown="onSpeedPress"
+                >
+                  {{ speedLabel }}
+                </button>
+                <Transition name="menu-slide">
+                  <div v-if="speedOpen" class="menu-dropdown">
+                    <div
+                      v-for="val in speedOptions"
+                      :key="val"
+                      class="menu-item"
+                      :class="{ selected: selectedSpeed === val }"
+                      @click="setSpeed(val)"
+                    >
+                      {{ val }}x
+                    </div>
+                  </div>
+                </Transition>
+              </div>
+
+              <!-- 分辨率菜单 -->
+              <div class="menu-wrapper" ref="resolutionMenu">
+                <button
+                  class="menu-trigger"
+                  :class="{ active: resHover && !resClick, clicked: resClick }"
+                  @click="toggleResMenu"
+                  @mouseenter="resHover = true"
+                  @mouseleave="resHover = false"
+                  @mousedown="onResPress"
+                >
+                  {{ currentResLabel }}
+                </button>
+                <Transition name="menu-slide">
+                  <div v-if="resOpen" class="menu-dropdown">
+                    <div
+                      v-for="item in resolutionList"
+                      :key="item.value"
+                      class="menu-item"
+                      :class="{ selected: selectedRes === item.value }"
+                      @click="setResolution(item.value)"
+                    >
+                      {{ item.label }}
+                    </div>
+                  </div>
+                </Transition>
+              </div>
+
+              <!-- 全屏按钮 -->
+              <button
+                class="control-btn fullscreen-btn"
+                :class="{ active: fullHover && !fullClick, clicked: fullClick }"
+                @click="toggleFullscreen"
+                @mouseenter="fullHover = true"
+                @mouseleave="fullHover = false"
+                @mousedown="onFullPress"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </Transition>
       </div>
 
-      <!-- 控制面板 -->
-      <Transition name="panel-fade">
-        <div v-if="panelVisible" class="control-panel" @mousedown.stop>
-          <!-- 进度条 -->
-          <div class="seek-bar" @mousedown="startSeek">
-            <div class="track">
-              <div class="buffer-fill" :style="{ width: bufferPercent + '%' }"></div>
-              <div class="progress-fill" :style="{ width: playPercent + '%' }"></div>
-              <div
-                class="thumb"
-                :class="{ dragging: seekActive }"
-                :style="{ left: playPercent + '%' }"
-                @mousedown.stop="startSeek"
-              ></div>
-            </div>
-          </div>
-
-          <!-- 控件组 -->
-          <div class="controls-row">
-            <div
-              class="play-toggle"
-              @click="togglePlayback"
-              @mouseenter="playHover = true"
-              @mouseleave="playHover = false"
-            >
-              <span v-if="videoMeta.paused" class="icon-play" :class="{ hover: playHover }"></span>
-              <span v-else class="icon-pause" :class="{ hover: playHover }"></span>
-            </div>
-
-            <span class="time-info">{{ formatTime(currentPos) }} / {{ formatTime(totalDuration) }}</span>
-
-            <div class="flex-grow"></div>
-
-            <!-- 倍速菜单 -->
-            <div class="menu-container" ref="speedMenuRef">
-              <button
-                class="menu-button"
-                :class="{ active: speedHover && !speedClick, clicked: speedClick }"
-                @click="toggleSpeedMenu"
-                @mouseenter="speedHover = true"
-                @mouseleave="speedHover = false"
-                @mousedown="onSpeedPress"
-              >
-                {{ speedLabel }}
-              </button>
-              <Transition name="menu-fade">
-                <div v-if="speedOpen" class="menu-dropdown">
-                  <div
-                    v-for="val in speedOptions"
-                    :key="val"
-                    class="menu-item"
-                    :class="{ selected: selectedSpeed === val }"
-                    @click="setSpeed(val)"
-                  >
-                    {{ val }}x
-                  </div>
-                </div>
-              </Transition>
-            </div>
-
-            <!-- 分辨率菜单 -->
-            <div class="menu-container" ref="resMenuRef">
-              <button
-                class="menu-button"
-                :class="{ active: resHover && !resClick, clicked: resClick }"
-                @click="toggleResMenu"
-                @mouseenter="resHover = true"
-                @mouseleave="resHover = false"
-                @mousedown="onResPress"
-              >
-                {{ currentResLabel }}
-              </button>
-              <Transition name="menu-fade">
-                <div v-if="resOpen" class="menu-dropdown">
-                  <div
-                    v-for="item in resolutionList"
-                    :key="item.value"
-                    class="menu-item"
-                    :class="{ selected: selectedRes === item.value }"
-                    @click="setResolution(item.value)"
-                  >
-                    {{ item.label }}
-                  </div>
-                </div>
-              </Transition>
-            </div>
-
-            <!-- 全屏按钮 -->
-            <div
-              class="fullscreen-button"
-              :class="{ hover: fullHover && !fullClick, clicked: fullClick }"
-              @click="toggleFullscreen"
-              @mouseenter="fullHover = true"
-              @mouseleave="fullHover = false"
-              @mousedown="onFullPress"
-            >
-              <div class="full-icon"></div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-
-      <!-- 视频标题（与视频一起粘性） -->
-      <h1 class="video-headline">{{ pageHeading }}</h1>
+      <!-- 视频标题（位于视频卡片下方） -->
+      <h1 class="video-title">{{ pageHeading }}</h1>
     </section>
 
-    <!-- 占位块，防止覆盖 -->
-    <div class="section-placeholder" :style="{ height: sectionHeight + 'px' }"></div>
+    <!-- 占位元素（防止粘性覆盖） -->
+    <div class="card-placeholder" :style="{ height: cardHeight + 'px' }"></div>
 
-    <!-- 视频选集 -->
-    <div class="playlist">
-      <h2 class="playlist-title">视频选集</h2>
-      <ul class="playlist-grid">
-        <li
+    <!-- 视频选集（卡片网格） -->
+    <div class="playlist-section">
+      <h2 class="playlist-heading">视频选集</h2>
+      <div class="playlist-grid">
+        <div
           v-for="item in videoCatalog"
           :key="item.url"
+          class="playlist-card"
           :class="{
-            current: item.url === currentSource.url,
-            highlight: hoveredItem === item.url && item.url !== currentSource.url
+            'active-card': item.url === currentSource.url,
+            'hover-card': hoveredItem === item.url && item.url !== currentSource.url
           }"
           @click="item.url !== currentSource.url && loadVideo(item)"
           @mouseenter="hoveredItem = item.url"
           @mouseleave="hoveredItem = null"
           @mousedown="onItemPress"
         >
-          {{ item.name }}
-        </li>
-      </ul>
+          <div class="card-thumbnail">
+            <svg viewBox="0 0 16 9" width="100%" height="100%">
+              <rect width="16" height="9" fill="#2563eb20" />
+              <text x="8" y="5" text-anchor="middle" fill="#2563eb" font-size="2">▶</text>
+            </svg>
+          </div>
+          <div class="card-title">{{ item.name }}</div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -175,15 +197,15 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useData, useRouter } from 'vitepress'
 
-// ----- 数据源 -----
+// ----- 数据 -----
 const { frontmatter, page } = useData()
 const router = useRouter()
 
-// ----- 视频元素 -----
+// ----- DOM 元素 -----
 const videoPlayer = ref(null)
-const videoSection = ref(null)
-const speedMenuRef = ref(null)
-const resMenuRef = ref(null)
+const videoCard = ref(null)
+const speedMenu = ref(null)
+const resolutionMenu = ref(null)
 
 // ----- 视频状态 -----
 const videoMeta = ref({
@@ -196,7 +218,7 @@ const currentPos = ref(0)
 const totalDuration = ref(0)
 const bufferPercent = ref(0)
 
-// ----- 控制面板可见性 -----
+// ----- 面板可见性 -----
 const panelVisible = ref(false)
 let panelTimer = null
 let clickTimer = null
@@ -205,7 +227,6 @@ let clickTimer = null
 let pressTimer = null
 const longPressActive = ref(false)
 const selectedSpeed = ref(1.0)
-const actualSpeed = ref(1.0)
 
 // ----- 菜单状态 -----
 const speedOpen = ref(false)
@@ -213,10 +234,10 @@ const resOpen = ref(false)
 const speedHover = ref(false)
 const resHover = ref(false)
 const fullHover = ref(false)
+const playHover = ref(false)
 const speedClick = ref(false)
 const resClick = ref(false)
 const fullClick = ref(false)
-const playHover = ref(false)
 
 // ----- 列表悬浮 -----
 const hoveredItem = ref(null)
@@ -237,7 +258,7 @@ const currentResLabel = computed(() => {
 // ----- 倍速选项 -----
 const speedOptions = ['2.0', '1.5', '1.25', '1.0', '0.75', '0.5']
 
-// ----- 当前视频源 -----
+// ----- 当前视频 -----
 const currentSource = ref({ url: '', name: '' })
 
 // ----- 页面标题 -----
@@ -263,7 +284,7 @@ const formatTime = (sec) => {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 }
 
-// ----- 获取同目录视频列表 -----
+// ----- 获取视频列表 -----
 const videoFiles = import.meta.glob(
   ['/**/*.mp4', '/**/*.webm', '/**/*.ogg', '/**/*.mov', '/**/*.avi', '/**/*.mkv', '/**/*.flv'],
   { eager: true, as: 'url' }
@@ -318,12 +339,11 @@ const loadVideo = (item) => {
   showPanel()
 }
 
-// ----- 视频事件回调 -----
+// ----- 视频事件 -----
 const onProgress = () => {
   const v = videoPlayer.value
   if (!v) return
   currentPos.value = v.currentTime
-  // 计算缓冲
   if (v.buffered.length) {
     for (let i = 0; i < v.buffered.length; i++) {
       if (v.currentTime >= v.buffered.start(i) && v.currentTime <= v.buffered.end(i)) {
@@ -333,27 +353,13 @@ const onProgress = () => {
     }
   }
 }
-const onMetaLoad = () => {
-  totalDuration.value = videoPlayer.value?.duration || 0
-}
-const onDataLoad = () => {
-  videoMeta.value.ready = true
-  videoMeta.value.buffering = false
-  updatePlaceholder()
-}
-const onWait = () => {
-  videoMeta.value.buffering = true
-}
-const onPlay = () => {
-  videoMeta.value.paused = false
-  videoMeta.value.buffering = false
-}
-const onFail = () => {
-  videoMeta.value.error = true
-  videoMeta.value.ready = false
-}
+const onMetaLoad = () => { totalDuration.value = videoPlayer.value?.duration || 0 }
+const onDataLoad = () => { videoMeta.value.ready = true; videoMeta.value.buffering = false; updateCardHeight() }
+const onWait = () => { videoMeta.value.buffering = true }
+const onPlay = () => { videoMeta.value.paused = false; videoMeta.value.buffering = false }
+const onFail = () => { videoMeta.value.error = true; videoMeta.value.ready = false }
 
-// ----- 播放/暂停切换 -----
+// ----- 播放控制 -----
 const togglePlayback = () => {
   const v = videoPlayer.value
   if (!v || videoMeta.value.error) return
@@ -371,7 +377,6 @@ const startLongPress = () => {
   if (!videoPlayer.value || videoMeta.value.error) return
   pressTimer = setTimeout(() => {
     longPressActive.value = true
-    actualSpeed.value = 3.0
     if (videoPlayer.value) videoPlayer.value.playbackRate = 3.0
   }, 500)
 }
@@ -379,13 +384,12 @@ const endLongPress = () => {
   if (pressTimer) clearTimeout(pressTimer)
   if (longPressActive.value) {
     longPressActive.value = false
-    actualSpeed.value = selectedSpeed.value
     if (videoPlayer.value) videoPlayer.value.playbackRate = selectedSpeed.value
   }
 }
 const cancelLongPress = endLongPress
 
-// ----- 单击/双击处理 -----
+// ----- 单击处理 -----
 const handleClick = () => {
   if (clickTimer) clearTimeout(clickTimer)
   clickTimer = setTimeout(() => {
@@ -412,7 +416,7 @@ const startSeek = (e) => {
   seekActive.value = true
   resetPanelTimer()
 
-  const track = e.currentTarget.querySelector('.track') || e.currentTarget
+  const track = e.currentTarget.querySelector('.progress-track') || e.currentTarget
   const update = (clientX) => {
     const rect = track.getBoundingClientRect()
     let percent = (clientX - rect.left) / rect.width
@@ -457,7 +461,6 @@ const setSpeed = (val) => {
   const num = parseFloat(val)
   selectedSpeed.value = num
   if (!longPressActive.value) {
-    actualSpeed.value = num
     if (videoPlayer.value) videoPlayer.value.playbackRate = num
   }
   speedOpen.value = false
@@ -468,7 +471,6 @@ const setSpeed = (val) => {
 const setResolution = (val) => {
   selectedRes.value = val
   resOpen.value = false
-  // 实际分辨率切换需要额外实现，这里留接口
   resetPanelTimer()
 }
 
@@ -484,7 +486,7 @@ const toggleResMenu = () => {
   resetPanelTimer()
 }
 
-// ----- 按钮点击效果（延迟移除）-----
+// ----- 按钮点击效果 -----
 const onSpeedPress = () => {
   speedClick.value = true
   setTimeout(() => { if (!speedHover.value) speedClick.value = false }, 300)
@@ -497,15 +499,15 @@ const onFullPress = () => {
   fullClick.value = true
   setTimeout(() => { if (!fullHover.value) fullClick.value = false }, 300)
 }
-const onItemPress = () => {} // 使用CSS :active
+const onItemPress = () => {}
 
 // ----- 全屏 -----
 const toggleFullscreen = () => {
-  if (!videoSection.value) return
+  if (!videoCard.value) return
   if (document.fullscreenElement) {
     document.exitFullscreen()
   } else {
-    videoSection.value.requestFullscreen()
+    videoCard.value.requestFullscreen()
   }
   resetPanelTimer()
 }
@@ -515,29 +517,29 @@ const goBack = () => window.history.back()
 
 // ----- 点击外部关闭菜单 -----
 const handleOutsideClick = (e) => {
-  if (speedMenuRef.value && !speedMenuRef.value.contains(e.target)) speedOpen.value = false
-  if (resMenuRef.value && !resMenuRef.value.contains(e.target)) resOpen.value = false
+  if (speedMenu.value && !speedMenu.value.contains(e.target)) speedOpen.value = false
+  if (resolutionMenu.value && !resolutionMenu.value.contains(e.target)) resOpen.value = false
 }
 
-// ----- 粘性容器占位高度 -----
-const sectionHeight = ref(0)
-const updatePlaceholder = () => {
-  if (!videoSection.value) return
+// ----- 粘性卡片占位高度 -----
+const cardHeight = ref(0)
+const updateCardHeight = () => {
+  if (!videoCard.value) return
   requestAnimationFrame(() => {
-    sectionHeight.value = videoSection.value.getBoundingClientRect().height
+    cardHeight.value = videoCard.value.getBoundingClientRect().height
   })
 }
 
 // ----- 生命周期 -----
 onMounted(() => {
   document.addEventListener('click', handleOutsideClick)
-  updatePlaceholder()
-  window.addEventListener('resize', updatePlaceholder)
-  const obs = new ResizeObserver(updatePlaceholder)
-  if (videoSection.value) obs.observe(videoSection.value)
+  updateCardHeight()
+  window.addEventListener('resize', updateCardHeight)
+  const obs = new ResizeObserver(updateCardHeight)
+  if (videoCard.value) obs.observe(videoCard.value)
   onBeforeUnmount(() => {
     document.removeEventListener('click', handleOutsideClick)
-    window.removeEventListener('resize', updatePlaceholder)
+    window.removeEventListener('resize', updateCardHeight)
     obs.disconnect()
     clearTimeout(panelTimer)
     clearTimeout(pressTimer)
@@ -545,52 +547,63 @@ onMounted(() => {
   })
 })
 
-// 视频切换时更新占位
-watch([() => videoMeta.value.ready, currentSource], () => nextTick(updatePlaceholder))
+// 视频切换时更新高度
+watch([() => videoMeta.value.ready, currentSource], () => nextTick(updateCardHeight))
 </script>
 
 <style scoped>
-/* 全局隐藏滚动条 */
+/* 全局滚动隐藏 */
 :global(html), :global(body) {
   overflow: hidden;
   height: 100%;
   margin: 0;
   padding: 0;
+  background: #f8f9fa;
 }
-.app-container {
+.video-app {
   height: 100vh;
   overflow-y: auto;
-  background: white;
+  background: #f8f9fa;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-.app-container::-webkit-scrollbar {
+.video-app::-webkit-scrollbar {
   display: none;
 }
 
-/* 头部导航 */
-.app-header {
+/* 毛玻璃导航 */
+.glass-navbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 60px;
-  background: white;
-  border-bottom: 1px solid #eee;
+  height: 64px;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(0,0,0,0.05);
   display: flex;
   align-items: center;
-  padding: 0 20px;
+  padding: 0 24px;
   z-index: 100;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
 }
 .nav-back {
   background: none;
   border: none;
-  font-size: 16px;
-  color: #333;
+  color: #2c3e50;
   cursor: pointer;
-  width: 60px;
-  text-align: left;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.2s;
+}
+.nav-back:hover {
+  background: rgba(37,99,235,0.1);
+  color: #2563eb;
 }
 .nav-logo {
   position: absolute;
@@ -598,29 +611,37 @@ watch([() => videoMeta.value.ready, currentSource], () => nextTick(updatePlaceho
   transform: translateX(-50%);
 }
 .nav-logo img {
-  height: 60px;
+  height: 48px;
   width: auto;
-  pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
 }
-.nav-spacer {
-  width: 60px;
+.nav-placeholder {
+  width: 40px;
 }
 
-/* 视频区域（粘性） */
-.video-section {
+/* 视频卡片 */
+.video-card {
   position: sticky;
-  top: 60px;
+  top: 64px;
   z-index: 90;
-  background: black;
+  background: white;
   width: 100%;
   overflow: visible;
+  border-radius: 0 0 24px 24px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.05);
 }
-.video-box {
+.video-container {
+  position: relative;
+  width: 100%;
+  background: black;
+  border-radius: 0;
+}
+.video-wrapper {
   position: relative;
   width: 100%;
   background: black;
 }
-.video-box.ratio-fixed {
+.video-wrapper.ratio-fixed {
   aspect-ratio: 16 / 9;
 }
 .video-element {
@@ -639,291 +660,269 @@ watch([() => videoMeta.value.ready, currentSource], () => nextTick(updatePlaceho
   z-index: 20;
   pointer-events: none;
 }
-.loading-state .spinner {
-  width: 50px;
-  height: 50px;
-  border: 5px solid rgba(255,255,255,0.3);
-  border-top: 5px solid #2563eb;
+.loading-overlay .spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(255,255,255,0.2);
+  border-top: 4px solid #2563eb;
   border-radius: 50%;
-  animation: rotate 1s linear infinite;
+  animation: spin 0.8s linear infinite;
 }
-@keyframes rotate { to { transform: rotate(360deg); } }
-.error-state {
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-overlay span {
   color: white;
   font-size: 16px;
   background: rgba(0,0,0,0.7);
+  padding: 8px 16px;
+  border-radius: 40px;
 }
 
-/* 控制面板 */
-.panel-fade-enter-active, .panel-fade-leave-active {
-  transition: opacity 0.3s;
-}
-.panel-fade-enter-from, .panel-fade-leave-to {
-  opacity: 0;
-}
-.control-panel {
+/* 控制栏 */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+.control-bar {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  padding: 16px 20px 12px;
   z-index: 30;
 }
-.seek-bar {
-  padding: 10px 12px 5px;
+.progress-area {
+  margin-bottom: 12px;
   cursor: pointer;
 }
-.track {
+.progress-track {
   position: relative;
-  height: 6px;
+  height: 4px;
   background: rgba(255,255,255,0.2);
-  border-radius: 3px;
+  border-radius: 4px;
+  transition: height 0.2s;
 }
-.buffer-fill {
+.progress-area:hover .progress-track {
+  height: 6px;
+}
+.buffer-progress {
   position: absolute;
   height: 100%;
   background: rgba(255,255,255,0.3);
-  border-radius: 3px;
+  border-radius: 4px;
   pointer-events: none;
 }
-.progress-fill {
+.play-progress {
   position: absolute;
   height: 100%;
   background: #2563eb;
-  border-radius: 3px;
+  border-radius: 4px;
   pointer-events: none;
 }
-.thumb {
+.progress-thumb {
   position: absolute;
   top: 50%;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   background: #2563eb;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  transition: transform 0.2s;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
 }
-.thumb.dragging {
+.progress-area:hover .progress-thumb {
+  opacity: 1;
+}
+.progress-thumb.dragging {
+  opacity: 1;
   transform: translate(-50%, -50%) scale(1.5);
 }
-.controls-row {
+.control-group {
   display: flex;
   align-items: center;
-  padding: 5px 12px 10px;
   color: white;
   font-size: 14px;
 }
-.play-toggle {
+.control-btn {
+  background: none;
+  border: none;
+  color: white;
   cursor: pointer;
-  margin-right: 15px;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.2s;
+  padding: 8px;
+  border-radius: 50%;
+  transition: background 0.2s, color 0.2s, transform 0.2s;
 }
-.play-toggle:active {
-  transform: scale(0.98);
+.control-btn:hover {
+  background: rgba(255,255,255,0.1);
 }
-.icon-play {
-  width: 0;
-  height: 0;
-  border-left: 16px solid white;
-  border-top: 10px solid transparent;
-  border-bottom: 10px solid transparent;
-  border-radius: 2px;
-  margin-left: 4px;
-  transition: border-left-color 0.2s;
+.control-btn.active {
+  color: #2563eb;
 }
-.icon-play.hover {
-  border-left-color: #2563eb;
+.control-btn.clicked {
+  transform: scale(0.9);
 }
-.icon-pause {
-  width: 16px;
-  height: 20px;
-  display: flex;
-  justify-content: space-between;
+.play-btn {
+  margin-right: 12px;
 }
-.icon-pause::before, .icon-pause::after {
-  content: '';
-  width: 5px;
-  height: 20px;
-  background: white;
-  border-radius: 2px;
-  transition: background 0.2s;
+.hover-blue {
+  fill: #2563eb;
 }
-.icon-pause.hover::before, .icon-pause.hover::after {
-  background: #2563eb;
+.time-display {
+  margin-right: 16px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,0.9);
 }
-.time-info {
-  margin-right: 15px;
-}
-.flex-grow {
+.flex-spacer {
   flex: 1;
 }
 
 /* 下拉菜单 */
-.menu-container {
+.menu-wrapper {
   position: relative;
-  margin-right: 15px;
+  margin: 0 8px;
 }
-.menu-button {
-  background: transparent;
-  border: none;
+.menu-trigger {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
   color: white;
-  font-weight: bold;
-  padding: 6px 12px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 30px;
   cursor: pointer;
   font-size: 14px;
-  transition: color 0.2s;
-  outline: none;
+  transition: background 0.2s, color 0.2s, transform 0.2s;
+  backdrop-filter: blur(4px);
 }
-.menu-button.active {
-  color: #2563eb;
+.menu-trigger.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: white;
 }
-.menu-button.clicked {
-  transform: scale(0.98);
+.menu-trigger.clicked {
+  transform: scale(0.95);
 }
-.menu-fade-enter-active, .menu-fade-leave-active {
-  transition: opacity 0.2s;
+.menu-slide-enter-active, .menu-slide-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
 }
-.menu-fade-enter-from, .menu-fade-leave-to {
+.menu-slide-enter-from, .menu-slide-leave-to {
   opacity: 0;
+  transform: translateY(8px);
 }
 .menu-dropdown {
   position: absolute;
   bottom: 100%;
   left: 50%;
   transform: translateX(-50%);
-  margin-bottom: 5px;
+  margin-bottom: 8px;
   background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  min-width: 120px;
+  border-radius: 16px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.2);
+  min-width: 130px;
   z-index: 200;
   overflow: hidden;
+  padding: 6px 0;
 }
 .menu-item {
-  padding: 8px 16px;
+  padding: 10px 16px;
   cursor: pointer;
-  color: #333;
+  color: #1e293b;
   font-size: 14px;
-  border-bottom: 1px solid #f0f0f0;
-  transition: background 0.2s;
+  text-align: center;
+  transition: background 0.2s, color 0.2s;
+  border-bottom: 1px solid #f1f5f9;
 }
 .menu-item:last-child {
   border-bottom: none;
 }
 .menu-item:hover {
-  background: #e6f7ff;
+  background: #f1f5f9;
 }
 .menu-item.selected {
   background: #2563eb;
   color: white;
 }
-
-/* 全屏按钮 */
-.fullscreen-button {
-  width: 32px;
-  height: 32px;
-  position: relative;
-  cursor: pointer;
-  transition: transform 0.2s;
-  margin-left: 10px;
-}
-.fullscreen-button.clicked {
-  transform: scale(0.98);
-}
-.fullscreen-button.hover .full-icon {
-  border-color: #2563eb;
-}
-.full-icon {
-  position: absolute;
-  inset: 0;
-  border: 2px solid white;
-  border-radius: 8px;
-  box-sizing: border-box;
-}
-.full-icon::before {
-  content: '';
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  right: 4px;
-  bottom: 4px;
-  background: rgba(0,0,0,0.5);
-  border-radius: 4px;
-}
-.full-icon::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  right: 2px;
-  bottom: 2px;
-  border: 2px solid white;
-  border-radius: 6px;
+.fullscreen-btn {
+  margin-left: 8px;
 }
 
 /* 视频标题 */
-.video-headline {
-  font-size: 24px;
-  font-weight: bold;
-  color: #333;
+.video-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
   margin: 0;
-  padding: 15px 20px;
-  border-top: 1px solid #e0e0e0;
-  border-bottom: 1px solid #e0e0e0;
+  padding: 24px 24px 20px;
   background: white;
+  border-top: 1px solid #eef2f6;
+  letter-spacing: -0.01em;
 }
 
 /* 占位块 */
-.section-placeholder {
+.card-placeholder {
   width: 100%;
   transition: height 0.2s;
 }
 
 /* 播放列表 */
-.playlist {
-  margin: 0 20px 20px;
+.playlist-section {
+  padding: 0 24px 40px;
 }
-.playlist-title {
-  font-size: 18px;
-  color: #666;
-  margin-bottom: 10px;
+.playlist-heading {
+  font-size: 20px;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 20px 0;
 }
 .playlist-grid {
-  list-style: none;
-  padding: 0;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  gap: 16px;
 }
-.playlist-grid li {
-  padding: 12px 16px;
-  background: #f5f5f5;
-  border-radius: 12px;
+.playlist-card {
+  background: white;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+  transition: transform 0.25s, box-shadow 0.25s, background 0.2s;
   cursor: pointer;
-  transition: all 0.2s;
-  color: #333;
-  text-align: center;
+  border: 1px solid #f0f0f0;
+}
+.playlist-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 30px rgba(37,99,235,0.1);
+}
+.playlist-card.active-card {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+.playlist-card.hover-card {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+.playlist-card:active {
+  transform: scale(0.98);
+}
+.card-thumbnail {
+  aspect-ratio: 16 / 9;
+  background: #eef2f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card-title {
+  padding: 14px 12px;
+  font-weight: 500;
+  font-size: 15px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: center;
 }
-.playlist-grid li.current {
-  background: #2563eb;
+.active-card .card-title,
+.hover-card .card-title {
   color: white;
-  cursor: default;
-  pointer-events: none;
-}
-.playlist-grid li:not(.current).highlight {
-  background: #2563eb;
-  color: white;
-}
-.playlist-grid li:not(.current):active {
-  transform: scale(0.98);
 }
 </style>
