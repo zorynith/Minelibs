@@ -13,17 +13,20 @@
     <div class="player-container" ref="playerContainer">
       <!-- 16:9 占位容器 -->
       <div class="video-wrapper" :class="{ 'video-loaded': videoLoaded }">
-        <div v-if="!videoLoaded" class="loading-placeholder">
+        <!-- 加载动画（视频加载或缓冲时显示） -->
+        <div v-if="!videoLoaded || isBuffering" class="loading-placeholder">
           <div class="loading-spinner"></div>
         </div>
         <video
           ref="video"
           class="video-player"
           :src="currentVideo.url"
-          preload="metadata"
+          preload="auto"
           @timeupdate="onTimeUpdate"
           @loadedmetadata="onLoadedMetadata"
           @loadeddata="onLoadedData"
+          @waiting="onWaiting"
+          @playing="onPlaying"
           @dblclick="onDblClick"
           @mousedown="onMouseDown"
           @mouseup="onMouseUp"
@@ -32,7 +35,7 @@
         ></video>
       </div>
 
-      <!-- 自定义控制栏（使用 Transition 实现淡入淡出） -->
+      <!-- 自定义控制栏 -->
       <Transition name="fade">
         <div v-if="controlsVisible" class="controls-overlay" @mousedown.stop>
           <!-- 进度条 -->
@@ -66,10 +69,10 @@
 
             <div class="spacer"></div>
 
-            <!-- 倍速下拉菜单 -->
+            <!-- 倍速下拉菜单（新样式：无边框，加粗，悬停仅文字变蓝） -->
             <div class="dropdown speed-dropdown" ref="speedDropdown">
               <button
-                class="dropdown-btn"
+                class="dropdown-btn speed-btn"
                 :class="{
                   hovered: speedBtnHovered && !speedBtnClicked,
                   clicked: speedBtnClicked
@@ -82,23 +85,25 @@
               >
                 {{ speedButtonText }}
               </button>
-              <div v-if="speedMenuOpen" class="dropdown-menu" :class="{ show: speedMenuOpen }">
-                <div
-                  v-for="rate in playbackRates"
-                  :key="rate"
-                  class="dropdown-item"
-                  :class="{ active: selectedPlaybackRate === parseFloat(rate) }"
-                  @click="selectPlaybackRate(parseFloat(rate))"
-                >
-                  {{ rate }}x
+              <Transition name="dropdown-fade">
+                <div v-if="speedMenuOpen" class="dropdown-menu" :class="{ show: speedMenuOpen }">
+                  <div
+                    v-for="rate in playbackRates"
+                    :key="rate"
+                    class="dropdown-item"
+                    :class="{ active: selectedPlaybackRate === parseFloat(rate) }"
+                    @click="selectPlaybackRate(parseFloat(rate))"
+                  >
+                    {{ rate }}x
+                  </div>
                 </div>
-              </div>
+              </Transition>
             </div>
 
-            <!-- 分辨率下拉菜单 -->
+            <!-- 分辨率下拉菜单（新样式：无边框，加粗，悬停仅文字变蓝） -->
             <div class="dropdown resolution-dropdown" ref="resolutionDropdown">
               <button
-                class="dropdown-btn"
+                class="dropdown-btn resolution-btn"
                 :class="{
                   hovered: resolutionBtnHovered && !resolutionBtnClicked,
                   clicked: resolutionBtnClicked
@@ -111,20 +116,22 @@
               >
                 {{ resolutionButtonText }}
               </button>
-              <div v-if="resolutionMenuOpen" class="dropdown-menu" :class="{ show: resolutionMenuOpen }">
-                <div
-                  v-for="res in resolutions"
-                  :key="res.value"
-                  class="dropdown-item"
-                  :class="{ active: selectedResolution === res.value }"
-                  @click="selectResolution(res.value)"
-                >
-                  {{ res.label }}
+              <Transition name="dropdown-fade">
+                <div v-if="resolutionMenuOpen" class="dropdown-menu" :class="{ show: resolutionMenuOpen }">
+                  <div
+                    v-for="res in resolutions"
+                    :key="res.value"
+                    class="dropdown-item"
+                    :class="{ active: selectedResolution === res.value }"
+                    @click="selectResolution(res.value)"
+                  >
+                    {{ res.label }}
+                  </div>
                 </div>
-              </div>
+              </Transition>
             </div>
 
-            <!-- 全屏按钮（自定义缺口边框） -->
+            <!-- 全屏按钮（保留原样式） -->
             <div
               class="fullscreen-btn-custom"
               :class="{
@@ -144,10 +151,10 @@
       </Transition>
     </div>
 
-    <!-- 视频标题（上下带横线） -->
+    <!-- 视频标题（紧贴视频下方） -->
     <h1 class="video-title">{{ pageTitle }}</h1>
 
-    <!-- 视频选集（原“当前目录下的视频”） -->
+    <!-- 视频选集列表 -->
     <div class="video-list">
       <h2>视频选集</h2>
       <ul>
@@ -190,6 +197,7 @@ const selectedPlaybackRate = ref(1.0)
 const controlsVisible = ref(false)
 const videoLoaded = ref(false)
 const isLongPressing = ref(false)
+const isBuffering = ref(false) // 缓冲状态
 
 // 定时器
 let longPressTimer = null
@@ -295,6 +303,7 @@ const videoList = computed(() => {
 const playVideo = (videoItem) => {
   currentVideo.value = videoItem
   videoLoaded.value = false
+  isBuffering.value = false
   nextTick(() => {
     if (video.value) {
       video.value.load()
@@ -329,6 +338,13 @@ const onLoadedMetadata = () => {
 }
 const onLoadedData = () => {
   videoLoaded.value = true
+  isBuffering.value = false
+}
+const onWaiting = () => {
+  isBuffering.value = true
+}
+const onPlaying = () => {
+  isBuffering.value = false
 }
 
 // 播放/暂停切换
@@ -595,8 +611,9 @@ const onListItemMouseLeave = (video) => {
 }
 
 .logo img {
-  height: 50px;
+  height: 60px; /* 调大logo */
   width: auto;
+  pointer-events: none; /* 防止鼠标事件影响，避免任何悬停效果 */
 }
 
 .navbar-placeholder {
@@ -631,7 +648,7 @@ const onListItemMouseLeave = (video) => {
   display: block;
 }
 
-/* 加载占位 */
+/* 加载占位（显示于视频上方） */
 .loading-placeholder {
   position: absolute;
   top: 0;
@@ -642,7 +659,7 @@ const onListItemMouseLeave = (video) => {
   align-items: center;
   justify-content: center;
   background-color: rgba(0,0,0,0.5);
-  z-index: 5;
+  z-index: 20; /* 确保在视频之上 */
 }
 
 .loading-spinner {
@@ -650,7 +667,7 @@ const onListItemMouseLeave = (video) => {
   height: 50px;
   border: 5px solid rgba(255,255,255,0.3);
   border-radius: 50%;
-  border-top-color: #2563eb; /* 新蓝色 */
+  border-top-color: #2563eb;
   animation: spin 1s ease-in-out infinite;
 }
 
@@ -694,7 +711,7 @@ const onListItemMouseLeave = (video) => {
 .progress-played {
   position: absolute;
   height: 100%;
-  background-color: #2563eb; /* 新蓝色 */
+  background-color: #2563eb;
   border-radius: 3px;
   pointer-events: none;
 }
@@ -704,7 +721,7 @@ const onListItemMouseLeave = (video) => {
   top: 50%;
   width: 12px;
   height: 12px;
-  background-color: #2563eb; /* 新蓝色 */
+  background-color: #2563eb;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
@@ -745,7 +762,7 @@ const onListItemMouseLeave = (video) => {
   transition: border-left-color 0.2s;
 }
 .play-icon.hovered {
-  border-left-color: #2563eb; /* 新蓝色 */
+  border-left-color: #2563eb;
 }
 
 .pause-icon {
@@ -765,7 +782,7 @@ const onListItemMouseLeave = (video) => {
 }
 .pause-icon.hovered::before,
 .pause-icon.hovered::after {
-  background-color: #2563eb; /* 新蓝色 */
+  background-color: #2563eb;
 }
 
 .time-display {
@@ -782,31 +799,40 @@ const onListItemMouseLeave = (video) => {
   margin-right: 15px;
 }
 
-/* 下拉菜单按钮 */
+/* 下拉菜单按钮（新样式：无边框，加粗，悬停仅文字变蓝） */
 .dropdown-btn {
-  background: rgba(0,0,0,0.5);
+  background: transparent;        /* 无背景 */
+  border: none;                   /* 无边框 */
   color: white;
-  border: 1px solid #2563eb; /* 新蓝色 */
-  border-radius: 4px;
+  font-weight: bold;              /* 加粗 */
   padding: 6px 12px;
   cursor: pointer;
   font-size: 14px;
-  transition: all 0.2s;
+  transition: color 0.2s;
+  outline: none;
 }
 .dropdown-btn.hovered {
-  background-color: #2563eb; /* 新蓝色 */
-  border-color: #2563eb;
+  color: #2563eb;                 /* 悬停仅文字变蓝 */
 }
 .dropdown-btn.clicked {
   transform: scale(0.98);
-  background-color: #2563eb; /* 新蓝色 */
 }
 
-/* 下拉菜单 */
+/* 下拉菜单淡入淡出 */
+.dropdown-fade-enter-active,
+.dropdown-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.dropdown-fade-enter-from,
+.dropdown-fade-leave-to {
+  opacity: 0;
+}
+
 .dropdown-menu {
   position: absolute;
   bottom: 100%;
-  left: 0;
+  left: 50%;
+  transform: translateX(-50%);    /* 水平居中 */
   margin-bottom: 5px;
   background: white;
   border-radius: 8px;
@@ -831,11 +857,11 @@ const onListItemMouseLeave = (video) => {
   background-color: #e6f7ff;
 }
 .dropdown-item.active {
-  background-color: #2563eb; /* 新蓝色 */
+  background-color: #2563eb;
   color: white;
 }
 
-/* 全屏按钮自定义 */
+/* 全屏按钮（保留原样式） */
 .fullscreen-btn-custom {
   width: 32px;
   height: 32px;
@@ -848,7 +874,7 @@ const onListItemMouseLeave = (video) => {
   transform: scale(0.98);
 }
 .fullscreen-btn-custom.hovered .fullscreen-border {
-  border-color: #2563eb; /* 新蓝色 */
+  border-color: #2563eb;
 }
 .fullscreen-border {
   position: absolute;
@@ -884,12 +910,12 @@ const onListItemMouseLeave = (video) => {
   pointer-events: none;
 }
 
-/* 视频标题 */
+/* 视频标题（紧贴视频下方） */
 .video-title {
   font-size: 24px;
   font-weight: bold;
   color: #333;
-  margin: 20px 0;
+  margin: 0;                      /* 清除默认边距 */
   padding: 15px 20px;
   border-top: 1px solid #e0e0e0;
   border-bottom: 1px solid #e0e0e0;
@@ -925,13 +951,13 @@ const onListItemMouseLeave = (video) => {
   text-overflow: ellipsis;
 }
 .video-list li.active {
-  background-color: #2563eb; /* 新蓝色 */
+  background-color: #2563eb;
   color: white;
   cursor: default;
   pointer-events: none;
 }
 .video-list li:not(.active).hovered {
-  background-color: #2563eb; /* 新蓝色 */
+  background-color: #2563eb;
   color: white;
 }
 .video-list li:not(.active):active {
