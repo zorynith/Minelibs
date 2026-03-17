@@ -197,17 +197,16 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useData, useRouter } from 'vitepress'
 
-// ----- 数据 -----
 const { frontmatter, page } = useData()
 const router = useRouter()
 
-// ----- DOM 元素 -----
+// DOM 元素
 const videoPlayer = ref(null)
 const videoCard = ref(null)
 const speedMenu = ref(null)
 const resolutionMenu = ref(null)
 
-// ----- 视频状态 -----
+// 视频状态
 const videoMeta = ref({
   ready: false,
   paused: true,
@@ -218,17 +217,17 @@ const currentPos = ref(0)
 const totalDuration = ref(0)
 const bufferPercent = ref(0)
 
-// ----- 面板可见性 -----
+// 面板可见性
 const panelVisible = ref(false)
 let panelTimer = null
 let clickTimer = null
 
-// ----- 长按加速 -----
+// 长按加速
 let pressTimer = null
 const longPressActive = ref(false)
 const selectedSpeed = ref(1.0)
 
-// ----- 菜单状态 -----
+// 菜单状态
 const speedOpen = ref(false)
 const resOpen = ref(false)
 const speedHover = ref(false)
@@ -239,10 +238,10 @@ const speedClick = ref(false)
 const resClick = ref(false)
 const fullClick = ref(false)
 
-// ----- 列表悬浮 -----
+// 列表悬浮
 const hoveredItem = ref(null)
 
-// ----- 分辨率 -----
+// 分辨率
 const resolutionList = [
   { value: '1080p', label: '1080P 高清' },
   { value: '720p', label: '720P 准高清' },
@@ -255,28 +254,28 @@ const currentResLabel = computed(() => {
   return found ? found.label : '720P 准高清'
 })
 
-// ----- 倍速选项 -----
+// 倍速选项
 const speedOptions = ['2.0', '1.5', '1.25', '1.0', '0.75', '0.5']
 
-// ----- 当前视频 -----
+// 当前视频
 const currentSource = ref({ url: '', name: '' })
 
-// ----- 页面标题 -----
+// 页面标题
 const pageHeading = computed(() => frontmatter.value.title || currentSource.value.name)
 
-// ----- 进度百分比 -----
+// 进度百分比
 const playPercent = computed(() => {
   if (totalDuration.value === 0) return 0
   return (currentPos.value / totalDuration.value) * 100
 })
 
-// ----- 倍速按钮文字 -----
+// 倍速按钮文字
 const speedLabel = computed(() => {
   if (longPressActive.value) return '3.0x'
   return selectedSpeed.value === 1.0 ? '倍速' : selectedSpeed.value + 'x'
 })
 
-// ----- 时间格式化 -----
+// 时间格式化
 const formatTime = (sec) => {
   if (isNaN(sec)) return '00:00'
   const m = Math.floor(sec / 60)
@@ -284,7 +283,7 @@ const formatTime = (sec) => {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 }
 
-// ----- 获取视频列表 -----
+// 获取视频列表
 const videoFiles = import.meta.glob(
   ['/**/*.mp4', '/**/*.webm', '/**/*.ogg', '/**/*.mov', '/**/*.avi', '/**/*.mkv', '/**/*.flv'],
   { eager: true, as: 'url' }
@@ -311,7 +310,7 @@ const videoCatalog = computed(() => {
   return list
 })
 
-// ----- 初始化视频 -----
+// 初始化视频
 const initVideo = () => {
   const catalog = videoCatalog.value
   if (!catalog.length) return
@@ -324,7 +323,7 @@ const initVideo = () => {
 }
 watch(videoCatalog, initVideo, { immediate: true })
 
-// ----- 加载视频 -----
+// 加载视频
 const loadVideo = (item) => {
   currentSource.value = item
   videoMeta.value = { ready: false, paused: true, buffering: false, error: false }
@@ -339,7 +338,7 @@ const loadVideo = (item) => {
   showPanel()
 }
 
-// ----- 视频事件 -----
+// 视频事件
 const onProgress = () => {
   const v = videoPlayer.value
   if (!v) return
@@ -354,12 +353,16 @@ const onProgress = () => {
   }
 }
 const onMetaLoad = () => { totalDuration.value = videoPlayer.value?.duration || 0 }
-const onDataLoad = () => { videoMeta.value.ready = true; videoMeta.value.buffering = false; updateCardHeight() }
+const onDataLoad = () => {
+  videoMeta.value.ready = true
+  videoMeta.value.buffering = false
+  updateCardHeight()
+}
 const onWait = () => { videoMeta.value.buffering = true }
 const onPlay = () => { videoMeta.value.paused = false; videoMeta.value.buffering = false }
 const onFail = () => { videoMeta.value.error = true; videoMeta.value.ready = false }
 
-// ----- 播放控制 -----
+// 播放控制
 const togglePlayback = () => {
   const v = videoPlayer.value
   if (!v || videoMeta.value.error) return
@@ -372,7 +375,7 @@ const togglePlayback = () => {
   resetPanelTimer()
 }
 
-// ----- 长按加速 -----
+// 长按加速
 const startLongPress = () => {
   if (!videoPlayer.value || videoMeta.value.error) return
   pressTimer = setTimeout(() => {
@@ -389,7 +392,7 @@ const endLongPress = () => {
 }
 const cancelLongPress = endLongPress
 
-// ----- 单击处理 -----
+// 单击处理
 const handleClick = () => {
   if (clickTimer) clearTimeout(clickTimer)
   clickTimer = setTimeout(() => {
@@ -403,7 +406,7 @@ const handleClick = () => {
   }, 250)
 }
 
-// ----- 进度条拖动 -----
+// 进度条拖动
 let seeking = false
 const seekActive = ref(false)
 const startSeek = (e) => {
@@ -442,7 +445,7 @@ const startSeek = (e) => {
   document.addEventListener('mouseup', onUp)
 }
 
-// ----- 面板自动隐藏 -----
+// 面板自动隐藏
 const resetPanelTimer = () => {
   if (panelTimer) clearTimeout(panelTimer)
   panelTimer = setTimeout(() => {
@@ -456,7 +459,7 @@ const showPanel = () => {
   resetPanelTimer()
 }
 
-// ----- 倍速选择 -----
+// 倍速选择
 const setSpeed = (val) => {
   const num = parseFloat(val)
   selectedSpeed.value = num
@@ -467,14 +470,14 @@ const setSpeed = (val) => {
   resetPanelTimer()
 }
 
-// ----- 分辨率选择 -----
+// 分辨率选择
 const setResolution = (val) => {
   selectedRes.value = val
   resOpen.value = false
   resetPanelTimer()
 }
 
-// ----- 菜单切换 -----
+// 菜单切换
 const toggleSpeedMenu = () => {
   speedOpen.value = !speedOpen.value
   resOpen.value = false
@@ -486,7 +489,7 @@ const toggleResMenu = () => {
   resetPanelTimer()
 }
 
-// ----- 按钮点击效果 -----
+// 按钮点击效果
 const onSpeedPress = () => {
   speedClick.value = true
   setTimeout(() => { if (!speedHover.value) speedClick.value = false }, 300)
@@ -501,7 +504,7 @@ const onFullPress = () => {
 }
 const onItemPress = () => {}
 
-// ----- 全屏 -----
+// 全屏
 const toggleFullscreen = () => {
   if (!videoCard.value) return
   if (document.fullscreenElement) {
@@ -512,30 +515,36 @@ const toggleFullscreen = () => {
   resetPanelTimer()
 }
 
-// ----- 返回上一级 -----
+// 返回上一级
 const goBack = () => window.history.back()
 
-// ----- 点击外部关闭菜单 -----
+// 点击外部关闭菜单
 const handleOutsideClick = (e) => {
   if (speedMenu.value && !speedMenu.value.contains(e.target)) speedOpen.value = false
   if (resolutionMenu.value && !resolutionMenu.value.contains(e.target)) resOpen.value = false
 }
 
-// ----- 粘性卡片占位高度 -----
+// 粘性卡片占位高度
 const cardHeight = ref(0)
 const updateCardHeight = () => {
   if (!videoCard.value) return
   requestAnimationFrame(() => {
-    cardHeight.value = videoCard.value.getBoundingClientRect().height
+    const height = videoCard.value.getBoundingClientRect().height
+    cardHeight.value = height
   })
 }
+const ensureCardHeight = () => {
+  updateCardHeight()
+  setTimeout(updateCardHeight, 50)
+  setTimeout(updateCardHeight, 200)
+}
 
-// ----- 生命周期 -----
+// 生命周期
 onMounted(() => {
   document.addEventListener('click', handleOutsideClick)
-  updateCardHeight()
+  ensureCardHeight()
   window.addEventListener('resize', updateCardHeight)
-  const obs = new ResizeObserver(updateCardHeight)
+  const obs = new ResizeObserver(() => { updateCardHeight() })
   if (videoCard.value) obs.observe(videoCard.value)
   onBeforeUnmount(() => {
     document.removeEventListener('click', handleOutsideClick)
@@ -547,8 +556,10 @@ onMounted(() => {
   })
 })
 
-// 视频切换时更新高度
-watch([() => videoMeta.value.ready, currentSource], () => nextTick(updateCardHeight))
+// 监听可能影响高度的变化
+watch([() => videoMeta.value.ready, currentSource, panelVisible], () => {
+  nextTick(updateCardHeight)
+})
 </script>
 
 <style scoped>
