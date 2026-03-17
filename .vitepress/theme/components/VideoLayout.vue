@@ -17,11 +17,15 @@
         <div v-if="!videoLoaded || isBuffering" class="loading-placeholder" @click.stop>
           <div class="loading-spinner"></div>
         </div>
+        <!-- 视频加载错误提示 -->
+        <div v-if="videoError" class="video-error" @click.stop>
+          视频加载失败，请检查文件路径或网络
+        </div>
         <video
           ref="video"
           class="video-player"
           :src="currentVideo.url"
-          preload="auto"
+          preload="metadata"
           @timeupdate="onTimeUpdate"
           @loadedmetadata="onLoadedMetadata"
           @loadeddata="onLoadedData"
@@ -32,10 +36,11 @@
           @mouseup="onMouseUp"
           @mouseleave="onMouseLeave"
           @click="onVideoClick"
+          @error="onVideoError"
         ></video>
       </div>
 
-      <!-- 自定义控制栏 -->
+      <!-- 自定义控制栏（绝对定位在视频容器底部） -->
       <Transition name="fade">
         <div v-if="controlsVisible" class="controls-overlay" @mousedown.stop>
           <!-- 进度条（含缓冲条） -->
@@ -151,11 +156,11 @@
         </div>
       </Transition>
 
-      <!-- 视频标题（位于视频下方） -->
+      <!-- 视频标题（位于视频下方，与视频容器一起粘性） -->
       <h1 class="video-title">{{ pageTitle }}</h1>
     </div>
 
-    <!-- 占位元素，用于防止粘性容器覆盖后续内容 -->
+    <!-- 占位元素，用于防止粘性容器覆盖后续内容，高度动态计算 -->
     <div class="player-placeholder" :style="{ height: placeholderHeight + 'px' }"></div>
 
     <!-- 视频选集列表 -->
@@ -203,6 +208,7 @@ const videoLoaded = ref(false)
 const isLongPressing = ref(false)
 const isBuffering = ref(false)
 const isDragging = ref(false)
+const videoError = ref(false)
 
 // 占位高度
 const placeholderHeight = ref(0)
@@ -212,6 +218,7 @@ let longPressTimer = null
 let hideControlsTimer = null
 let clickTimer = null
 let resizeObserver = null
+let heightUpdatePending = false
 
 // 下拉菜单状态
 const speedMenuOpen = ref(false)
@@ -326,10 +333,14 @@ const playVideo = (videoItem) => {
   currentVideo.value = videoItem
   videoLoaded.value = false
   isBuffering.value = false
+  videoError.value = false
   nextTick(() => {
     if (video.value) {
       video.value.load()
-      video.value.play().catch(e => console.log('自动播放失败:', e))
+      video.value.play().catch(e => {
+        console.log('自动播放失败:', e)
+        videoError.value = true
+      })
     }
   })
   controlsVisible.value = true
@@ -369,12 +380,17 @@ const onWaiting = () => {
 const onPlaying = () => {
   isBuffering.value = false
 }
+const onVideoError = () => {
+  videoError.value = true
+  videoLoaded.value = false
+  console.error('视频加载失败')
+}
 
 // 播放/暂停切换
 const togglePlay = () => {
-  if (!video.value) return
+  if (!video.value || videoError.value) return
   if (video.value.paused) {
-    video.value.play()
+    video.value.play().catch(e => console.log('播放失败:', e))
   } else {
     video.value.pause()
   }
@@ -397,12 +413,13 @@ const selectPlaybackRate = (rate) => {
 const selectResolution = (res) => {
   selectedResolution.value = res
   resolutionMenuOpen.value = false
+  // 这里可以触发分辨率切换逻辑（需要实际实现）
   resetHideControlsTimer()
 }
 
 // 长按加速
 const onMouseDown = () => {
-  if (!video.value) return
+  if (!video.value || videoError.value) return
   longPressTimer = setTimeout(() => {
     isLongPressing.value = true
     playbackRate.value = 3.0
@@ -453,6 +470,8 @@ const onDblClick = () => {
 const onProgressMouseDown = (e) => {
   e.preventDefault()
   e.stopPropagation()
+  if (duration.value <= 0 || !video.value) return
+
   controlsVisible.value = true
   isDragging.value = true
   resetHideControlsTimer()
@@ -464,7 +483,6 @@ const onProgressMouseDown = (e) => {
   }
 
   const updateCurrentTime = (clientX) => {
-    if (duration.value <= 0) return
     const rect = wrapper.getBoundingClientRect()
     let percent = (clientX - rect.left) / rect.width
     percent = Math.max(0, Math.min(1, percent))
@@ -535,20 +553,27 @@ const handleClickOutside = (e) => {
   }
 }
 
-// 更新占位高度
+// 更新占位高度（确保粘性容器不覆盖后续内容）
 const updatePlaceholderHeight = () => {
-  if (playerContainer.value) {
-    placeholderHeight.value = playerContainer.value.offsetHeight
-  }
+  if (heightUpdatePending) return
+  heightUpdatePending = true
+  requestAnimationFrame(() => {
+    if (playerContainer.value) {
+      const height = playerContainer.value.getBoundingClientRect().height
+      placeholderHeight.value = height
+    }
+    heightUpdatePending = false
+  })
 }
 
 // 生命周期
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  // 初始更新占位高度
   updatePlaceholderHeight()
   // 监听窗口大小变化
   window.addEventListener('resize', updatePlaceholderHeight)
-  // 使用 ResizeObserver 更精确地监听容器高度变化
+  // 使用 ResizeObserver 监听容器大小变化
   if (window.ResizeObserver) {
     resizeObserver = new ResizeObserver(updatePlaceholderHeight)
     if (playerContainer.value) resizeObserver.observe(playerContainer.value)
@@ -561,9 +586,12 @@ onBeforeUnmount(() => {
   if (resizeObserver) {
     resizeObserver.disconnect()
   }
+  if (hideControlsTimer) clearTimeout(hideControlsTimer)
+  if (longPressTimer) clearTimeout(longPressTimer)
+  if (clickTimer) clearTimeout(clickTimer)
 })
 
-// 监听视频加载完成或切换视频时更新占位高度
+// 监听视频切换更新占位高度
 watch([videoLoaded, currentVideo], () => {
   nextTick(updatePlaceholderHeight)
 })
@@ -683,7 +711,7 @@ const onListItemMouseLeave = (video) => {
   z-index: 90;
   background-color: #000;
   width: 100%;
-  overflow: visible; /* 改为 visible 防止标题被裁剪 */
+  overflow: visible; /* 防止标题被裁剪 */
 }
 
 /* 16:9 视频包装器 */
@@ -730,6 +758,20 @@ const onListItemMouseLeave = (video) => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* 视频错误提示 */
+.video-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  background: rgba(0,0,0,0.7);
+  padding: 10px 20px;
+  border-radius: 4px;
+  z-index: 25;
+  pointer-events: none;
 }
 
 /* 控制栏淡入淡出过渡 */
