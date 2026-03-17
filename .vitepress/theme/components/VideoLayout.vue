@@ -49,7 +49,7 @@
 
           <!-- 底部控件条 -->
           <div class="controls">
-            <!-- 播放/暂停按钮（无点击延迟） -->
+            <!-- 播放/暂停按钮 -->
             <div
               class="play-pause"
               @click="togglePlay"
@@ -124,7 +124,7 @@
               </div>
             </div>
 
-            <!-- 全屏按钮（自定义样式，有缺口边框） -->
+            <!-- 全屏按钮（自定义缺口边框） -->
             <div
               class="fullscreen-btn-custom"
               :class="{
@@ -147,9 +147,9 @@
     <!-- 视频标题（上下带横线） -->
     <h1 class="video-title">{{ pageTitle }}</h1>
 
-    <!-- 同目录视频列表（网格布局，每行两个） -->
+    <!-- 视频选集（原“当前目录下的视频”） -->
     <div class="video-list">
-      <h2>当前目录下的视频</h2>
+      <h2>视频选集</h2>
       <ul>
         <li
           v-for="video in videoList"
@@ -185,11 +185,11 @@ const progressWrapper = ref(null)
 const currentTime = ref(0)
 const duration = ref(0)
 const videoPaused = ref(true)
-const playbackRate = ref(1.0)          // 实际播放速度
-const selectedPlaybackRate = ref(1.0)   // 用户选择的倍速（不包含长按临时3x）
+const playbackRate = ref(1.0)
+const selectedPlaybackRate = ref(1.0)
 const controlsVisible = ref(false)
 const videoLoaded = ref(false)
-const isLongPressing = ref(false)       // 是否正在长按加速
+const isLongPressing = ref(false)
 
 // 定时器
 let longPressTimer = null
@@ -202,16 +202,14 @@ const resolutionMenuOpen = ref(false)
 const speedDropdown = ref(null)
 const resolutionDropdown = ref(null)
 
-// 按钮点击状态（用于视觉效果）
+// 按钮状态
 const speedBtnClicked = ref(false)
 const resolutionBtnClicked = ref(false)
 const fullscreenBtnClicked = ref(false)
-
-// 按钮悬浮状态
 const speedBtnHovered = ref(false)
 const resolutionBtnHovered = ref(false)
 const fullscreenBtnHovered = ref(false)
-const playPauseHovered = ref(false) // 播放暂停按钮没有点击延迟，但需要悬浮效果
+const playPauseHovered = ref(false)
 
 // 列表项悬浮状态
 const hoveredListItem = ref(null)
@@ -225,7 +223,7 @@ const resolutions = [
 ]
 const selectedResolution = ref('720p')
 
-// 倍速选项（按显示顺序）
+// 倍速选项
 const playbackRates = ['2.0', '1.5', '1.25', '1.0', '0.75', '0.5']
 
 // 当前视频信息
@@ -345,7 +343,7 @@ const togglePlay = () => {
   resetHideControlsTimer()
 }
 
-// 改变倍速（用户选择）
+// 改变倍速
 const selectPlaybackRate = (rate) => {
   selectedPlaybackRate.value = rate
   if (!isLongPressing.value) {
@@ -360,7 +358,6 @@ const selectPlaybackRate = (rate) => {
 const selectResolution = (res) => {
   selectedResolution.value = res
   resolutionMenuOpen.value = false
-  // 触发分辨率切换逻辑（可扩展）
   resetHideControlsTimer()
 }
 
@@ -390,7 +387,7 @@ const onMouseLeave = () => {
   onMouseUp()
 }
 
-// 单击视频（延迟处理，避免与双击冲突）
+// 单击视频（延迟处理）
 const onVideoClick = () => {
   if (clickTimer) clearTimeout(clickTimer)
   clickTimer = setTimeout(() => {
@@ -499,12 +496,10 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
 })
 
-// ---- 按钮视觉效果处理 ----
-// 播放暂停按钮（无点击延迟，只有悬浮效果）
+// ---- 按钮视觉效果 ----
 const onPlayPauseMouseEnter = () => { playPauseHovered.value = true }
 const onPlayPauseMouseLeave = () => { playPauseHovered.value = false }
 
-// 倍速按钮
 const onSpeedMouseEnter = () => { speedBtnHovered.value = true }
 const onSpeedMouseLeave = () => { speedBtnHovered.value = false }
 const onSpeedMouseDown = () => {
@@ -513,11 +508,8 @@ const onSpeedMouseDown = () => {
     if (!speedBtnHovered.value) speedBtnClicked.value = false
   }, 300)
 }
-const onSpeedMouseUp = () => {
-  // 可以留空，或根据需求处理
-}
+const onSpeedMouseUp = () => {}
 
-// 分辨率按钮
 const onResolutionMouseEnter = () => { resolutionBtnHovered.value = true }
 const onResolutionMouseLeave = () => { resolutionBtnHovered.value = false }
 const onResolutionMouseDown = () => {
@@ -528,7 +520,6 @@ const onResolutionMouseDown = () => {
 }
 const onResolutionMouseUp = () => {}
 
-// 全屏按钮
 const onFullscreenMouseEnter = () => { fullscreenBtnHovered.value = true }
 const onFullscreenMouseLeave = () => { fullscreenBtnHovered.value = false }
 const onFullscreenMouseDown = () => {
@@ -539,28 +530,30 @@ const onFullscreenMouseDown = () => {
 }
 const onFullscreenMouseUp = () => {}
 
-// 列表项视觉效果（点击缩放）
-const onListItemMouseDown = () => {
-  // 通过 CSS 的 :active 处理，不需要额外 JS
-}
+const onListItemMouseDown = () => {}
 const onListItemMouseUp = () => {}
-
-const onListItemMouseEnter = (video) => {
-  hoveredListItem.value = video.url
-}
+const onListItemMouseEnter = (video) => { hoveredListItem.value = video.url }
 const onListItemMouseLeave = (video) => {
   if (hoveredListItem.value === video.url) hoveredListItem.value = null
 }
 </script>
 
 <style scoped>
-/* 隐藏页面滚动条 */
+/* 隐藏全局滚动条 */
+:global(html),
+:global(body) {
+  overflow: hidden;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
 .video-page {
   max-width: 100%;
   margin: 0;
   padding: 0;
   background-color: #fff;
-  min-height: 100vh;
+  height: 100vh;
   overflow-y: auto;
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* IE/Edge */
@@ -602,7 +595,7 @@ const onListItemMouseLeave = (video) => {
 }
 
 .logo img {
-  height: 50px; /* 调大logo */
+  height: 50px;
   width: auto;
 }
 
@@ -657,7 +650,7 @@ const onListItemMouseLeave = (video) => {
   height: 50px;
   border: 5px solid rgba(255,255,255,0.3);
   border-radius: 50%;
-  border-top-color: #1e90ff;
+  border-top-color: #2563eb; /* 新蓝色 */
   animation: spin 1s ease-in-out infinite;
 }
 
@@ -701,7 +694,7 @@ const onListItemMouseLeave = (video) => {
 .progress-played {
   position: absolute;
   height: 100%;
-  background-color: #1e90ff;
+  background-color: #2563eb; /* 新蓝色 */
   border-radius: 3px;
   pointer-events: none;
 }
@@ -711,7 +704,7 @@ const onListItemMouseLeave = (video) => {
   top: 50%;
   width: 12px;
   height: 12px;
-  background-color: #1e90ff;
+  background-color: #2563eb; /* 新蓝色 */
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
@@ -741,7 +734,6 @@ const onListItemMouseLeave = (video) => {
   transform: scale(0.98);
 }
 
-/* 播放图标（右三角） */
 .play-icon {
   width: 0;
   height: 0;
@@ -753,10 +745,9 @@ const onListItemMouseLeave = (video) => {
   transition: border-left-color 0.2s;
 }
 .play-icon.hovered {
-  border-left-color: #1e90ff;
+  border-left-color: #2563eb; /* 新蓝色 */
 }
 
-/* 暂停图标（两条竖线） */
 .pause-icon {
   width: 16px;
   height: 20px;
@@ -774,7 +765,7 @@ const onListItemMouseLeave = (video) => {
 }
 .pause-icon.hovered::before,
 .pause-icon.hovered::after {
-  background-color: #1e90ff;
+  background-color: #2563eb; /* 新蓝色 */
 }
 
 .time-display {
@@ -795,7 +786,7 @@ const onListItemMouseLeave = (video) => {
 .dropdown-btn {
   background: rgba(0,0,0,0.5);
   color: white;
-  border: 1px solid #1e90ff;
+  border: 1px solid #2563eb; /* 新蓝色 */
   border-radius: 4px;
   padding: 6px 12px;
   cursor: pointer;
@@ -803,12 +794,12 @@ const onListItemMouseLeave = (video) => {
   transition: all 0.2s;
 }
 .dropdown-btn.hovered {
-  background-color: #1e90ff;
-  border-color: #1e90ff;
+  background-color: #2563eb; /* 新蓝色 */
+  border-color: #2563eb;
 }
 .dropdown-btn.clicked {
   transform: scale(0.98);
-  background-color: #1e90ff;
+  background-color: #2563eb; /* 新蓝色 */
 }
 
 /* 下拉菜单 */
@@ -840,11 +831,11 @@ const onListItemMouseLeave = (video) => {
   background-color: #e6f7ff;
 }
 .dropdown-item.active {
-  background-color: #1e90ff;
+  background-color: #2563eb; /* 新蓝色 */
   color: white;
 }
 
-/* 全屏按钮自定义（带缺口边框） */
+/* 全屏按钮自定义 */
 .fullscreen-btn-custom {
   width: 32px;
   height: 32px;
@@ -857,7 +848,7 @@ const onListItemMouseLeave = (video) => {
   transform: scale(0.98);
 }
 .fullscreen-btn-custom.hovered .fullscreen-border {
-  border-color: #1e90ff;
+  border-color: #2563eb; /* 新蓝色 */
 }
 .fullscreen-border {
   position: absolute;
@@ -869,20 +860,6 @@ const onListItemMouseLeave = (video) => {
   border-radius: 8px;
   box-sizing: border-box;
   pointer-events: none;
-}
-/* 通过伪元素制造边框缺口 */
-.fullscreen-border::before,
-.fullscreen-border::after {
-  content: '';
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  background: transparent;
-  border: 2px solid transparent;
-}
-/* 使用白色矩形覆盖中间部分，形成缺口（模拟） */
-.fullscreen-btn-custom {
-  background: transparent;
 }
 .fullscreen-btn-custom::before {
   content: '';
@@ -906,7 +883,6 @@ const onListItemMouseLeave = (video) => {
   border-radius: 6px;
   pointer-events: none;
 }
-/* 上述方法可以产生缺口视觉效果，但严格来说不是真正的缺口。如需更精确实现，可以使用 SVG 或 mask，但此处已满足基本样式要求。 */
 
 /* 视频标题 */
 .video-title {
@@ -920,7 +896,7 @@ const onListItemMouseLeave = (video) => {
   background-color: #fff;
 }
 
-/* 视频列表网格 */
+/* 视频选集列表 */
 .video-list {
   margin: 0 20px 20px;
 }
@@ -949,13 +925,13 @@ const onListItemMouseLeave = (video) => {
   text-overflow: ellipsis;
 }
 .video-list li.active {
-  background-color: #1e90ff;
+  background-color: #2563eb; /* 新蓝色 */
   color: white;
   cursor: default;
   pointer-events: none;
 }
 .video-list li:not(.active).hovered {
-  background-color: #1e90ff;
+  background-color: #2563eb; /* 新蓝色 */
   color: white;
 }
 .video-list li:not(.active):active {
