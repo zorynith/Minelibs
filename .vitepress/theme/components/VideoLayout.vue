@@ -406,32 +406,38 @@ const handleClick = () => {
   }, 250)
 }
 
-// 进度条拖动
+// 进度条拖动（修复：立即响应点击和拖动）
 let seeking = false
 const seekActive = ref(false)
 const startSeek = (e) => {
   e.preventDefault()
   e.stopPropagation()
-  if (totalDuration.value === 0 || !videoPlayer.value) return
+  // 确保视频已加载元数据，否则无法跳转
+  if (totalDuration.value <= 0 || !videoPlayer.value) return
 
   panelVisible.value = true
   seeking = true
   seekActive.value = true
   resetPanelTimer()
 
+  // 获取进度条容器（可能是 .progress-track 或当前元素）
   const track = e.currentTarget.querySelector('.progress-track') || e.currentTarget
-  const update = (clientX) => {
+
+  // 根据鼠标位置更新视频时间的函数
+  const updateTimeFromEvent = (clientX) => {
     const rect = track.getBoundingClientRect()
     let percent = (clientX - rect.left) / rect.width
     percent = Math.max(0, Math.min(1, percent))
     videoPlayer.value.currentTime = percent * totalDuration.value
   }
 
-  update(e.clientX)
+  // 立即执行一次，让点击时跳转
+  updateTimeFromEvent(e.clientX)
 
+  // 监听移动和松开
   const onMove = (ev) => {
     ev.preventDefault()
-    update(ev.clientX)
+    updateTimeFromEvent(ev.clientX)
     resetPanelTimer()
   }
   const onUp = () => {
@@ -439,6 +445,8 @@ const startSeek = (e) => {
     seekActive.value = false
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
+    // 松开后重置定时器
+    resetPanelTimer()
   }
 
   document.addEventListener('mousemove', onMove)
@@ -524,7 +532,7 @@ const handleOutsideClick = (e) => {
   if (resolutionMenu.value && !resolutionMenu.value.contains(e.target)) resOpen.value = false
 }
 
-// 粘性卡片占位高度
+// 粘性卡片占位高度（确保视频列表不被覆盖）
 const cardHeight = ref(0)
 const updateCardHeight = () => {
   if (!videoCard.value) return
@@ -533,10 +541,12 @@ const updateCardHeight = () => {
     cardHeight.value = height
   })
 }
+// 强制多次更新，确保初始布局正确
 const ensureCardHeight = () => {
   updateCardHeight()
   setTimeout(updateCardHeight, 50)
   setTimeout(updateCardHeight, 200)
+  setTimeout(updateCardHeight, 500)
 }
 
 // 生命周期
