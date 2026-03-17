@@ -88,6 +88,11 @@ const vitePressOptions = {
     }
   },
   
+  // 添加 vite 配置，支持视频文件作为静态资源
+  vite: {
+    assetsInclude: ['**/*.mp4', '**/*.webm', '**/*.ogg', '**/*.mov', '**/*.avi', '**/*.mkv', '**/*.flv']
+  },
+
   // 添加 sitemap 生成功能
   async buildEnd(siteConfig) {
     // 配置网站基础路径
