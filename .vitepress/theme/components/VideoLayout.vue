@@ -6,12 +6,12 @@
       <div class="logo">
         <img src="https://minelibs.eu.org/Minelibs.png" alt="Logo" />
       </div>
-      <div class="navbar-placeholder"></div> <!-- 占位保持居中 -->
+      <div class="navbar-placeholder"></div>
     </nav>
 
-    <!-- 视频播放器区域 -->
+    <!-- 视频播放器区域（粘性定位，悬浮在导航栏下方） -->
     <div class="player-container" ref="playerContainer">
-      <!-- 16:9 占位容器（加载时显示动画） -->
+      <!-- 16:9 占位容器 -->
       <div class="video-wrapper" :class="{ 'video-loaded': videoLoaded }">
         <div v-if="!videoLoaded" class="loading-placeholder">
           <div class="loading-spinner"></div>
@@ -24,7 +24,7 @@
           @timeupdate="onTimeUpdate"
           @loadedmetadata="onLoadedMetadata"
           @loadeddata="onLoadedData"
-          @dblclick="togglePlay"
+          @dblclick="onDblClick"
           @mousedown="onMouseDown"
           @mouseup="onMouseUp"
           @mouseleave="onMouseLeave"
@@ -32,47 +32,49 @@
         ></video>
       </div>
 
-      <!-- 自定义控制栏（单击视频显示，5秒无操作自动隐藏） -->
-      <div class="controls-overlay" v-show="controlsVisible" @mousedown.stop>
-        <!-- 进度条 -->
-        <div class="progress-bar-container" @mousedown="onProgressMouseDown">
-          <div class="progress-wrapper" ref="progressWrapper">
-            <div class="progress-played" :style="{ width: playedPercent + '%' }"></div>
-            <div
-              class="progress-handle"
-              :style="{ left: playedPercent + '%' }"
-              @mousedown.stop="onProgressMouseDown"
-            ></div>
+      <!-- 自定义控制栏（使用 Transition 实现淡入淡出） -->
+      <Transition name="fade">
+        <div v-if="controlsVisible" class="controls-overlay" @mousedown.stop>
+          <!-- 进度条 -->
+          <div class="progress-bar-container" @mousedown="onProgressMouseDown">
+            <div class="progress-wrapper" ref="progressWrapper">
+              <div class="progress-played" :style="{ width: playedPercent + '%' }"></div>
+              <div
+                class="progress-handle"
+                :style="{ left: playedPercent + '%' }"
+                @mousedown.stop="onProgressMouseDown"
+              ></div>
+            </div>
           </div>
-        </div>
 
-        <!-- 底部控件条 -->
-        <div class="controls">
-          <div class="play-pause" @click="togglePlay">
-            <span v-if="videoPaused" class="play-icon"></span>
-            <span v-else class="pause-icon"></span>
+          <!-- 底部控件条 -->
+          <div class="controls">
+            <div class="play-pause" @click="togglePlay">
+              <span v-if="videoPaused" class="play-icon"></span>
+              <span v-else class="pause-icon"></span>
+            </div>
+            <div class="time-display">
+              {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
+            </div>
+            <div class="spacer"></div>
+            <div class="speed-control">
+              <span class="speed-label">倍速</span>
+              <select v-model="playbackRate" @change="changeSpeed">
+                <option value="0.25">0.25x</option>
+                <option value="0.5">0.5x</option>
+                <option value="1.0" selected>1.0x</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2.0">2.0x</option>
+              </select>
+            </div>
+            <div class="fullscreen-btn" @click="toggleFullscreen">全屏</div>
           </div>
-          <div class="time-display">
-            {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
-          </div>
-          <div class="spacer"></div>
-          <div class="speed-control">
-            <span class="speed-label">倍速</span>
-            <select v-model="playbackRate" @change="changeSpeed">
-              <option value="0.25">0.25x</option>
-              <option value="0.5">0.5x</option>
-              <option value="1.0" selected>1.0x</option>
-              <option value="1.25">1.25x</option>
-              <option value="1.5">1.5x</option>
-              <option value="2.0">2.0x</option>
-            </select>
-          </div>
-          <div class="fullscreen-btn" @click="toggleFullscreen">全屏</div>
         </div>
-      </div>
+      </Transition>
     </div>
 
-    <!-- 视频标题 -->
+    <!-- 视频标题（上下带横线） -->
     <h1 class="video-title">{{ pageTitle }}</h1>
 
     <!-- 同目录视频列表 -->
@@ -93,10 +95,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { useRouter } from 'vitepress'
+import { ref, computed, watch, nextTick } from 'vue'
+import { useRouter, useData } from 'vitepress'
 
 const router = useRouter()
+const { frontmatter, page } = useData()
 
 // 视频相关 ref
 const video = ref(null)
@@ -106,13 +109,13 @@ const currentTime = ref(0)
 const duration = ref(0)
 const videoPaused = ref(true)
 const playbackRate = ref(1.0)
-const controlsVisible = ref(false) // 控制栏是否显示（包含进度条和底部控件）
-const videoLoaded = ref(false)      // 视频是否已加载可播放
+const controlsVisible = ref(false)
+const videoLoaded = ref(false)
 
-// 长按加速计时器
+// 定时器
 let longPressTimer = null
-// 控制栏自动隐藏计时器
 let hideControlsTimer = null
+let clickTimer = null          // 用于延迟显示/隐藏控制栏
 
 // 当前视频信息
 const currentVideo = ref({
@@ -120,22 +123,16 @@ const currentVideo = ref({
   name: ''
 })
 
-// 页面标题：优先使用 frontmatter 中的 title，否则使用当前视频文件名
-// 注意：这里无法直接使用 useData() 的 frontmatter，因为我们在自定义布局中不再继承 DefaultTheme
-// 我们需要从页面元数据获取 frontmatter。但由于 Layout 已经分离，我们需要通过其他方式传递。
-// 临时方案：从路由的 meta 或从页面的 frontmatter 获取？可以使用 useData()，但需从 vitepress 导入。
-// 修正：导入 useData
-import { useData } from 'vitepress'
-const { frontmatter } = useData()
+// 页面标题
 const pageTitle = computed(() => frontmatter.value.title || currentVideo.value.name)
 
-// 计算播放进度百分比
+// 播放进度百分比
 const playedPercent = computed(() => {
   if (duration.value === 0) return 0
   return (currentTime.value / duration.value) * 100
 })
 
-// 格式化时间为 mm:ss
+// 格式化时间
 const formatTime = (seconds) => {
   if (isNaN(seconds)) return '00:00'
   const mins = Math.floor(seconds / 60)
@@ -143,24 +140,22 @@ const formatTime = (seconds) => {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
-// ---------- 获取所有视频文件（支持常见格式）----------
+// ---------- 获取所有视频文件 ----------
 const videoModules = import.meta.glob(
   ['/**/*.mp4', '/**/*.webm', '/**/*.ogg', '/**/*.mov', '/**/*.avi', '/**/*.mkv', '/**/*.flv'],
   { eager: true, as: 'url' }
 )
 
-// 获取当前页面的源文件目录
-import { useData as usePageData } from 'vitepress'
-const { page } = usePageData()
+// 当前目录
 const currentDir = computed(() => {
-  const filePath = page.value.filePath // 例如 'mmb/some/page.md'
+  const filePath = page.value.filePath
   if (!filePath) return ''
   const lastSlash = filePath.lastIndexOf('/')
   if (lastSlash === -1) return ''
-  return filePath.substring(0, lastSlash + 1) // 包含末尾斜杠，如 'mmb/some/'
+  return filePath.substring(0, lastSlash + 1)
 })
 
-// 过滤出同目录的视频列表
+// 同目录视频列表
 const videoList = computed(() => {
   const dir = currentDir.value
   if (!dir) return []
@@ -175,22 +170,21 @@ const videoList = computed(() => {
   return list
 })
 
-// 设置当前播放的视频
+// 播放指定视频
 const playVideo = (videoItem) => {
   currentVideo.value = videoItem
-  videoLoaded.value = false // 重置加载状态
+  videoLoaded.value = false
   nextTick(() => {
     if (video.value) {
       video.value.load()
       video.value.play().catch(e => console.log('自动播放失败:', e))
     }
   })
-  // 显示控制栏并重置定时器
   controlsVisible.value = true
   resetHideControlsTimer()
 }
 
-// 初始化当前视频：优先使用 frontmatter 中指定的视频文件名，否则取列表第一个
+// 初始化当前视频
 const initCurrentVideo = () => {
   const list = videoList.value
   if (list.length === 0) return
@@ -205,7 +199,7 @@ const initCurrentVideo = () => {
 
 watch(videoList, initCurrentVideo, { immediate: true })
 
-// 视频事件处理
+// 视频事件
 const onTimeUpdate = () => {
   if (video.value) currentTime.value = video.value.currentTime
 }
@@ -225,17 +219,16 @@ const togglePlay = () => {
     video.value.pause()
   }
   videoPaused.value = video.value.paused
-  // 重置控制栏隐藏定时器
   resetHideControlsTimer()
 }
 
-// 改变播放速度
+// 改变倍速
 const changeSpeed = () => {
   if (video.value) video.value.playbackRate = playbackRate.value
   resetHideControlsTimer()
 }
 
-// 长按加速逻辑
+// 长按加速
 const onMouseDown = () => {
   if (!video.value) return
   longPressTimer = setTimeout(() => {
@@ -251,21 +244,33 @@ const onMouseUp = () => {
   if (video.value) video.value.playbackRate = playbackRate.value
   resetHideControlsTimer()
 }
-const onMouseLeave = () => {
-  onMouseUp()
+const onMouseLeave = onMouseUp
+
+// 单击视频（延迟执行，避免与双击冲突）
+const onVideoClick = () => {
+  if (clickTimer) clearTimeout(clickTimer)
+  clickTimer = setTimeout(() => {
+    // 切换控制栏显示状态
+    controlsVisible.value = !controlsVisible.value
+    if (controlsVisible.value) {
+      resetHideControlsTimer()
+    } else {
+      if (hideControlsTimer) {
+        clearTimeout(hideControlsTimer)
+        hideControlsTimer = null
+      }
+    }
+    clickTimer = null
+  }, 250) // 250ms 延迟，略大于双击间隔
 }
 
-// 单击视频：切换控制栏显示/隐藏，如果显示则启动隐藏定时器
-const onVideoClick = () => {
-  controlsVisible.value = !controlsVisible.value
-  if (controlsVisible.value) {
-    resetHideControlsTimer()
-  } else {
-    if (hideControlsTimer) {
-      clearTimeout(hideControlsTimer)
-      hideControlsTimer = null
-    }
+// 双击视频（立即暂停，并取消单击的延迟操作）
+const onDblClick = () => {
+  if (clickTimer) {
+    clearTimeout(clickTimer)
+    clickTimer = null
   }
+  togglePlay() // 双击暂停/播放
 }
 
 // 进度条拖拽
@@ -304,9 +309,7 @@ const onProgressMouseDown = (e) => {
 
 // 重置控制栏隐藏定时器
 const resetHideControlsTimer = () => {
-  if (hideControlsTimer) {
-    clearTimeout(hideControlsTimer)
-  }
+  if (hideControlsTimer) clearTimeout(hideControlsTimer)
   hideControlsTimer = setTimeout(() => {
     controlsVisible.value = false
   }, 5000)
@@ -323,7 +326,7 @@ const toggleFullscreen = () => {
   resetHideControlsTimer()
 }
 
-// 返回按钮：使用浏览器历史返回
+// 返回上一页
 const goBack = () => {
   window.history.back()
 }
@@ -371,18 +374,19 @@ const goBack = () => {
 }
 
 .logo img {
-  height: 40px;
+  height: 50px; /* 调大logo */
   width: auto;
 }
 
 .navbar-placeholder {
-  width: 60px; /* 与返回按钮等宽，保持平衡 */
+  width: 60px;
 }
 
-/* 视频播放器区域，上边距等于导航栏高度 */
+/* 视频播放器区域 - 粘性定位，悬浮在导航栏下方 */
 .player-container {
-  position: relative;
-  margin-top: 60px;
+  position: sticky;
+  top: 60px;
+  z-index: 90;
   background-color: #000;
   width: 100%;
   overflow: hidden;
@@ -433,14 +437,22 @@ const goBack = () => {
   to { transform: rotate(360deg); }
 }
 
-/* 控制栏覆盖层 */
+/* 控制栏淡入淡出过渡 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
 .controls-overlay {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
   background: linear-gradient(transparent, rgba(0,0,0,0.7));
-  transition: opacity 0.2s;
   z-index: 10;
 }
 
@@ -461,7 +473,7 @@ const goBack = () => {
 .progress-played {
   position: absolute;
   height: 100%;
-  background-color: #1e90ff; /* 纯蓝色 */
+  background-color: #1e90ff;
   border-radius: 3px;
   pointer-events: none;
 }
@@ -496,17 +508,18 @@ const goBack = () => {
   justify-content: center;
 }
 
-/* 播放图标（右三角） */
+/* 播放图标（右三角）- 使用圆角风格，通过旋转正方形实现 */
 .play-icon {
   width: 0;
   height: 0;
   border-left: 16px solid white;
   border-top: 10px solid transparent;
   border-bottom: 10px solid transparent;
-  margin-left: 4px; /* 微调居中 */
+  border-radius: 2px; /* 给三角形添加轻微圆角效果（作用于border的角，不明显） */
+  margin-left: 4px;
 }
 
-/* 暂停图标（两条竖线） */
+/* 暂停图标（两条竖线）- 已圆角 */
 .pause-icon {
   width: 16px;
   height: 20px;
@@ -520,6 +533,7 @@ const goBack = () => {
   height: 20px;
   background-color: white;
   border-radius: 2px;
+  transition: background-color 0.2s;
 }
 
 .time-display {
@@ -554,11 +568,16 @@ const goBack = () => {
   cursor: pointer;
 }
 
+/* 视频标题 - 上下加横线，紧贴两端 */
 .video-title {
   font-size: 24px;
   font-weight: bold;
   color: #333;
-  margin: 20px;
+  margin: 20px 0; /* 上下边距，左右为0 */
+  padding: 15px 20px; /* 左右内边距保持内容与边缘距离，但横线紧贴两端 */
+  border-top: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #fff;
 }
 
 .video-list {
