@@ -9,12 +9,12 @@
       <div class="navbar-placeholder"></div>
     </nav>
 
-    <!-- 视频播放器区域（粘性定位） -->
+    <!-- 视频播放器区域（粘性定位，包含视频和标题） -->
     <div class="player-container" ref="playerContainer">
-      <!-- 16:9 占位容器 -->
+      <!-- 16:9 视频包装器 -->
       <div class="video-wrapper" :class="{ 'video-loaded': videoLoaded }">
-        <!-- 加载动画（视频加载或缓冲时显示） -->
-        <div v-if="!videoLoaded || isBuffering" class="loading-placeholder">
+        <!-- 加载动画（不阻挡点击） -->
+        <div v-if="!videoLoaded || isBuffering" class="loading-placeholder" @click.stop>
           <div class="loading-spinner"></div>
         </div>
         <video
@@ -35,15 +35,20 @@
         ></video>
       </div>
 
-      <!-- 自定义控制栏 -->
+      <!-- 自定义控制栏（位于视频之上） -->
       <Transition name="fade">
         <div v-if="controlsVisible" class="controls-overlay" @mousedown.stop>
-          <!-- 进度条 -->
+          <!-- 进度条（含缓冲条） -->
           <div class="progress-bar-container" @mousedown="onProgressMouseDown">
             <div class="progress-wrapper" ref="progressWrapper">
+              <!-- 缓冲进度条 -->
+              <div class="progress-buffered" :style="{ width: bufferedPercent + '%' }"></div>
+              <!-- 播放进度条 -->
               <div class="progress-played" :style="{ width: playedPercent + '%' }"></div>
+              <!-- 拖拽圆点 -->
               <div
                 class="progress-handle"
+                :class="{ dragging: isDragging }"
                 :style="{ left: playedPercent + '%' }"
                 @mousedown.stop="onProgressMouseDown"
               ></div>
@@ -69,7 +74,7 @@
 
             <div class="spacer"></div>
 
-            <!-- 倍速下拉菜单（新样式：无边框，加粗，悬停仅文字变蓝） -->
+            <!-- 倍速下拉菜单 -->
             <div class="dropdown speed-dropdown" ref="speedDropdown">
               <button
                 class="dropdown-btn speed-btn"
@@ -100,7 +105,7 @@
               </Transition>
             </div>
 
-            <!-- 分辨率下拉菜单（新样式：无边框，加粗，悬停仅文字变蓝） -->
+            <!-- 分辨率下拉菜单 -->
             <div class="dropdown resolution-dropdown" ref="resolutionDropdown">
               <button
                 class="dropdown-btn resolution-btn"
@@ -131,7 +136,7 @@
               </Transition>
             </div>
 
-            <!-- 全屏按钮（保留原样式） -->
+            <!-- 全屏按钮 -->
             <div
               class="fullscreen-btn-custom"
               :class="{
@@ -149,12 +154,12 @@
           </div>
         </div>
       </Transition>
+
+      <!-- 视频标题（紧贴视频下方，与视频一起悬浮） -->
+      <h1 class="video-title">{{ pageTitle }}</h1>
     </div>
 
-    <!-- 视频标题（紧贴视频下方） -->
-    <h1 class="video-title">{{ pageTitle }}</h1>
-
-    <!-- 视频选集列表 -->
+    <!-- 视频选集列表（正常滚动） -->
     <div class="video-list">
       <h2>视频选集</h2>
       <ul>
@@ -197,7 +202,8 @@ const selectedPlaybackRate = ref(1.0)
 const controlsVisible = ref(false)
 const videoLoaded = ref(false)
 const isLongPressing = ref(false)
-const isBuffering = ref(false) // 缓冲状态
+const isBuffering = ref(false)
+const isDragging = ref(false) // 进度条拖拽中
 
 // 定时器
 let longPressTimer = null
@@ -247,6 +253,20 @@ const pageTitle = computed(() => frontmatter.value.title || currentVideo.value.n
 const playedPercent = computed(() => {
   if (duration.value === 0) return 0
   return (currentTime.value / duration.value) * 100
+})
+
+// 缓冲进度百分比
+const bufferedPercent = computed(() => {
+  if (!video.value || duration.value === 0) return 0
+  const buffered = video.value.buffered
+  if (buffered.length === 0) return 0
+  // 取当前播放位置所在的缓冲区间
+  for (let i = 0; i < buffered.length; i++) {
+    if (currentTime.value >= buffered.start(i) && currentTime.value <= buffered.end(i)) {
+      return (buffered.end(i) / duration.value) * 100
+    }
+  }
+  return 0
 })
 
 // 格式化时间
@@ -430,6 +450,7 @@ const onDblClick = () => {
 const onProgressMouseDown = (e) => {
   e.preventDefault()
   controlsVisible.value = true
+  isDragging.value = true
   resetHideControlsTimer()
 
   const wrapper = progressWrapper.value
@@ -451,6 +472,7 @@ const onProgressMouseDown = (e) => {
     resetHideControlsTimer()
   }
   const onMouseUp = () => {
+    isDragging.value = false
     resetHideControlsTimer()
     document.removeEventListener('mousemove', onMouseMove)
     document.removeEventListener('mouseup', onMouseUp)
@@ -611,16 +633,16 @@ const onListItemMouseLeave = (video) => {
 }
 
 .logo img {
-  height: 60px; /* 调大logo */
+  height: 60px;
   width: auto;
-  pointer-events: none; /* 防止鼠标事件影响，避免任何悬停效果 */
+  pointer-events: none;
 }
 
 .navbar-placeholder {
   width: 60px;
 }
 
-/* 视频播放器区域 - 粘性定位 */
+/* 视频播放器区域 - 粘性定位（包含视频和标题） */
 .player-container {
   position: sticky;
   top: 60px;
@@ -648,7 +670,7 @@ const onListItemMouseLeave = (video) => {
   display: block;
 }
 
-/* 加载占位（显示于视频上方） */
+/* 加载占位（不阻挡点击） */
 .loading-placeholder {
   position: absolute;
   top: 0;
@@ -659,7 +681,8 @@ const onListItemMouseLeave = (video) => {
   align-items: center;
   justify-content: center;
   background-color: rgba(0,0,0,0.5);
-  z-index: 20; /* 确保在视频之上 */
+  z-index: 20;
+  pointer-events: none; /* 允许点击穿透 */
 }
 
 .loading-spinner {
@@ -691,7 +714,7 @@ const onListItemMouseLeave = (video) => {
   left: 0;
   right: 0;
   background: linear-gradient(transparent, rgba(0,0,0,0.7));
-  z-index: 10;
+  z-index: 30; /* 高于加载动画，确保可点击 */
 }
 
 /* 进度条容器 */
@@ -703,11 +726,21 @@ const onListItemMouseLeave = (video) => {
 .progress-wrapper {
   position: relative;
   height: 6px;
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.2); /* 更透明的背景 */
   border-radius: 3px;
   cursor: pointer;
 }
 
+/* 缓冲进度条 */
+.progress-buffered {
+  position: absolute;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.3); /* 半透明浅色 */
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+/* 播放进度条 */
 .progress-played {
   position: absolute;
   height: 100%;
@@ -716,6 +749,7 @@ const onListItemMouseLeave = (video) => {
   pointer-events: none;
 }
 
+/* 拖拽圆点 */
 .progress-handle {
   position: absolute;
   top: 50%;
@@ -725,6 +759,10 @@ const onListItemMouseLeave = (video) => {
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
+  transition: transform 0.2s ease;
+}
+.progress-handle.dragging {
+  transform: translate(-50%, -50%) scale(1.5);
 }
 
 /* 底部控件条 */
@@ -799,12 +837,12 @@ const onListItemMouseLeave = (video) => {
   margin-right: 15px;
 }
 
-/* 下拉菜单按钮（新样式：无边框，加粗，悬停仅文字变蓝） */
+/* 下拉菜单按钮（无边框，加粗，悬停仅文字变蓝） */
 .dropdown-btn {
-  background: transparent;        /* 无背景 */
-  border: none;                   /* 无边框 */
+  background: transparent;
+  border: none;
   color: white;
-  font-weight: bold;              /* 加粗 */
+  font-weight: bold;
   padding: 6px 12px;
   cursor: pointer;
   font-size: 14px;
@@ -812,7 +850,7 @@ const onListItemMouseLeave = (video) => {
   outline: none;
 }
 .dropdown-btn.hovered {
-  color: #2563eb;                 /* 悬停仅文字变蓝 */
+  color: #2563eb;
 }
 .dropdown-btn.clicked {
   transform: scale(0.98);
@@ -832,7 +870,7 @@ const onListItemMouseLeave = (video) => {
   position: absolute;
   bottom: 100%;
   left: 50%;
-  transform: translateX(-50%);    /* 水平居中 */
+  transform: translateX(-50%);
   margin-bottom: 5px;
   background: white;
   border-radius: 8px;
@@ -910,12 +948,12 @@ const onListItemMouseLeave = (video) => {
   pointer-events: none;
 }
 
-/* 视频标题（紧贴视频下方） */
+/* 视频标题（位于视频下方，与视频一起悬浮） */
 .video-title {
   font-size: 24px;
   font-weight: bold;
   color: #333;
-  margin: 0;                      /* 清除默认边距 */
+  margin: 0;
   padding: 15px 20px;
   border-top: 1px solid #e0e0e0;
   border-bottom: 1px solid #e0e0e0;
