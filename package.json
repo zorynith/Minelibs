@@ -7,5 +7,9 @@
     "docs:dev": "vitepress dev",
     "docs:build": "vitepress build",
     "docs:preview": "vitepress preview"
+  },
+  "dependencies": {
+    "video.js": "^7.21.7",
+    "vue-video-player": "^6.0.0"
   }
 }
