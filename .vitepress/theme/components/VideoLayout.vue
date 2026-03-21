@@ -11,8 +11,8 @@
 
     <!-- 视频播放器区域 -->
     <div class="player-container" ref="playerContainer">
-      <video-player
-        ref="playerRef"
+      <VideoPlayer
+        ref="playerInstance"
         class="video-player vjs-custom-skin"
         :options="playerOptions"
         @ready="onPlayerReady"
@@ -89,13 +89,18 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useData } from 'vitepress'
 import 'video.js/dist/video-js.css'
-import { videoPlayer } from 'vue-video-player'
+import { videoPlayer as VideoPlayerComponent } from 'vue-video-player'
+
+// 由于在模板中使用的是 <VideoPlayer>，我们需要将其注册为组件
+// 在 setup 中，我们可以通过 defineComponent 或直接使用 components 选项
+// 为了简单，我们直接定义组件并暴露
+const VideoPlayer = VideoPlayerComponent
 
 const router = useRouter()
 const { frontmatter, page } = useData()
 
 // 播放器实例引用
-const playerRef = ref(null)  // 重命名，避免与导入的 videoPlayer 冲突
+const playerInstance = ref(null)
 const playerContainer = ref(null)
 let player = null
 
