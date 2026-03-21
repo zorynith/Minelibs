@@ -27,6 +27,35 @@
       <div v-if="isBuffering && !videoPaused" class="loading-overlay">
         <div class="loading-spinner"></div>
       </div>
+
+      <!-- 自定义分辨率菜单（放置于播放器区域内，便于定位） -->
+      <div class="resolution-dropdown" ref="resolutionDropdown">
+        <button
+          class="resolution-btn"
+          :class="{
+            hovered: resolutionBtnHovered && !resolutionBtnClicked,
+            clicked: resolutionBtnClicked
+          }"
+          @click="toggleResolutionMenu"
+          @mouseenter="onResolutionMouseEnter"
+          @mouseleave="onResolutionMouseLeave"
+          @mousedown="onResolutionMouseDown"
+          @mouseup="onResolutionMouseUp"
+        >
+          {{ resolutionButtonText }}
+        </button>
+        <div v-if="resolutionMenuOpen" class="resolution-menu">
+          <div
+            v-for="res in resolutions"
+            :key="res.value"
+            class="resolution-item"
+            :class="{ active: selectedResolution === res.value }"
+            @click="selectResolution(res.value)"
+          >
+            {{ res.label }}
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 视频标题 -->
@@ -78,12 +107,10 @@ const videoPaused = ref(true)
 const isBuffering = ref(false)
 const selectedPlaybackRate = ref(1.0)
 const selectedResolution = ref('720p')
-const speedMenuOpen = ref(false)
 const resolutionMenuOpen = ref(false)
-const speedDropdown = ref(null)
 const resolutionDropdown = ref(null)
 
-// 按钮悬停/点击状态（仅用于分辨率菜单）
+// 按钮悬停/点击状态
 const resolutionBtnHovered = ref(false)
 const resolutionBtnClicked = ref(false)
 const hoveredListItem = ref(null)
@@ -112,12 +139,11 @@ const resolutionButtonText = computed(() => {
 // 视频播放器配置
 const playerOptions = ref({
   autoplay: false,
-  controls: true,               // 显示原生控制栏
+  controls: true,
   preload: 'auto',
-  fluid: true,                 // 自适应容器
-  aspectRatio: '16:9',         // 强制 16:9
+  fluid: true,
+  aspectRatio: '16:9',
   controlBar: {
-    // 保留所有原生控件，但可以通过 children 自定义顺序
     children: [
       'playToggle',
       'currentTimeDisplay',
@@ -126,17 +152,15 @@ const playerOptions = ref({
       'progressControl',
       'remainingTimeDisplay',
       'volumePanel',
-      'playbackRateMenuButton', // 原生倍速菜单
+      'playbackRateMenuButton',
       'fullscreenToggle'
     ],
     volumePanel: { inline: false }
   },
-  playbackRates: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0], // 原生倍速选项
+  playbackRates: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0],
   userActions: {
-    hotkeys: true               // 启用热键（空格、左右箭头等）
-  },
-  // 自定义主题色（可选）
-  // 通过 CSS 覆盖即可，不用在此配置
+    hotkeys: true
+  }
 })
 
 // ---------- 获取所有视频文件 ----------
@@ -197,15 +221,10 @@ const onPlayerReady = (playerInstance) => {
   player = playerInstance
   player.src(currentVideo.value.url)
   player.load()
-  // 设置初始倍速
   player.playbackRate(selectedPlaybackRate.value)
-  // 监听倍速变化（原生控件改变时同步）
   player.on('ratechange', () => {
     selectedPlaybackRate.value = player.playbackRate()
   })
-  // 监听全屏变化（可选）
-  player.on('fullscreenchange', () => {})
-  // 监听播放暂停
   player.on('play', () => { videoPaused.value = false })
   player.on('pause', () => { videoPaused.value = true })
   player.on('timeupdate', () => { currentTime.value = player.currentTime() })
@@ -220,9 +239,8 @@ const onTimeUpdate = () => { if (player) currentTime.value = player.currentTime(
 const onWaiting = () => { isBuffering.value = true }
 const onPlaying = () => { isBuffering.value = false }
 
-// 双击暂停/播放（覆盖原生双击全屏行为）
+// 双击暂停/播放
 const onDblClick = (event) => {
-  // 阻止原生双击全屏
   event.preventDefault()
   if (player.paused()) {
     player.play()
@@ -231,16 +249,14 @@ const onDblClick = (event) => {
   }
 }
 
-// 长按加速（长按 500ms 后倍速变为 3.0，松开恢复）
+// 长按加速
 let isLongPressing = false
 const onMouseDown = () => {
   if (!player) return
   longPressTimer = setTimeout(() => {
     isLongPressing = true
-    // 记录原倍速
     const originalRate = player.playbackRate()
     player.playbackRate(3.0)
-    // 保存原倍速，待松开时恢复
     window.__originalPlaybackRate = originalRate
   }, 500)
 }
@@ -263,19 +279,14 @@ const onMouseLeave = () => {
   onMouseUp()
 }
 
-// 分辨率切换（改变视频源）
+// 分辨率切换
 const selectResolution = (res) => {
   selectedResolution.value = res
   resolutionMenuOpen.value = false
-  // 这里可以根据分辨率切换不同的视频源，但需要预先准备不同分辨率的视频文件
-  // 简单起见，我们假设同一视频有多种分辨率文件，命名规则如：video_1080p.mp4
-  // 根据当前视频的基础名，拼接分辨率后缀
   if (player) {
     const baseName = currentVideo.value.url.replace(/\.[^/.]+$/, '')
     const ext = currentVideo.value.url.match(/\.[^/.]+$/)[0]
     const newUrl = `${baseName}_${res}${ext}`
-    // 检查文件是否存在，如果存在则切换，否则提示或不做处理
-    // 由于无法在客户端直接检查文件是否存在，这里简单尝试切换，若失败则忽略
     player.src(newUrl)
     player.load()
     player.play()
@@ -286,7 +297,6 @@ const selectResolution = (res) => {
 const toggleResolutionMenu = () => {
   resolutionMenuOpen.value = !resolutionMenuOpen.value
   if (resolutionMenuOpen.value) {
-    // 自动隐藏菜单的定时器（可选）
     if (hideResolutionTimer) clearTimeout(hideResolutionTimer)
     hideResolutionTimer = setTimeout(() => {
       resolutionMenuOpen.value = false
@@ -302,7 +312,6 @@ const handleClickOutside = (e) => {
 }
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
-  // 监听视频容器鼠标事件以实现长按加速
   if (playerContainer.value) {
     playerContainer.value.addEventListener('mousedown', onMouseDown)
     playerContainer.value.addEventListener('mouseup', onMouseUp)
@@ -419,10 +428,10 @@ const goBack = () => {
   z-index: 90;
   background-color: #000;
   width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 
-/* 覆盖 video.js 默认样式，使其适应容器 */
+/* 覆盖 video.js 样式，使其适应容器 */
 .video-player {
   width: 100%;
   height: auto;
@@ -432,7 +441,8 @@ const goBack = () => {
   height: auto !important;
   aspect-ratio: 16 / 9;
 }
-/* 自定义加载动画覆盖层 */
+
+/* 加载动画覆盖层 */
 .loading-overlay {
   position: absolute;
   top: 0;
@@ -456,6 +466,61 @@ const goBack = () => {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* 自定义分辨率菜单（位于播放器右下角） */
+.resolution-dropdown {
+  position: absolute;
+  bottom: 70px;
+  right: 20px;
+  z-index: 200;
+}
+.resolution-btn {
+  background: rgba(0,0,0,0.7);
+  color: white;
+  border: none;
+  font-weight: bold;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.2s, background 0.2s;
+}
+.resolution-btn.hovered {
+  background: rgba(0,0,0,0.9);
+  color: #2563eb;
+}
+.resolution-btn.clicked {
+  transform: scale(0.98);
+}
+.resolution-menu {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 5px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 120px;
+  overflow: hidden;
+}
+.resolution-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: #333;
+  font-size: 14px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background 0.2s;
+}
+.resolution-item:last-child {
+  border-bottom: none;
+}
+.resolution-item:hover {
+  background-color: #e6f7ff;
+}
+.resolution-item.active {
+  background-color: #2563eb;
+  color: white;
 }
 
 /* 视频标题 */
@@ -511,93 +576,4 @@ const goBack = () => {
 .video-list li:not(.active):active {
   transform: scale(0.98);
 }
-
-/* 分辨率自定义菜单（放在视频区域外，与播放器同级） */
-.resolution-dropdown {
-  position: absolute;
-  bottom: 70px;
-  right: 20px;
-  z-index: 200;
-}
-.resolution-btn {
-  background: rgba(0,0,0,0.7);
-  color: white;
-  border: none;
-  font-weight: bold;
-  padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: color 0.2s, background 0.2s;
-}
-.resolution-btn.hovered {
-  background: rgba(0,0,0,0.9);
-  color: #2563eb;
-}
-.resolution-btn.clicked {
-  transform: scale(0.98);
-}
-.resolution-menu {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 5px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  min-width: 120px;
-  overflow: hidden;
-}
-.resolution-item {
-  padding: 8px 16px;
-  cursor: pointer;
-  color: #333;
-  font-size: 14px;
-  border-bottom: 1px solid #f0f0f0;
-  transition: background 0.2s;
-}
-.resolution-item:last-child {
-  border-bottom: none;
-}
-.resolution-item:hover {
-  background-color: #e6f7ff;
-}
-.resolution-item.active {
-  background-color: #2563eb;
-  color: white;
-}
 </style>
-
-<!-- 添加自定义分辨率菜单（在模板末尾） -->
-<template>
-  <!-- ... 原有内容 ... -->
-  <div class="resolution-dropdown" ref="resolutionDropdown">
-    <button
-      class="resolution-btn"
-      :class="{
-        hovered: resolutionBtnHovered && !resolutionBtnClicked,
-        clicked: resolutionBtnClicked
-      }"
-      @click="toggleResolutionMenu"
-      @mouseenter="onResolutionMouseEnter"
-      @mouseleave="onResolutionMouseLeave"
-      @mousedown="onResolutionMouseDown"
-      @mouseup="onResolutionMouseUp"
-    >
-      {{ resolutionButtonText }}
-    </button>
-    <div v-if="resolutionMenuOpen" class="resolution-menu">
-      <div
-        v-for="res in resolutions"
-        :key="res.value"
-        class="resolution-item"
-        :class="{ active: selectedResolution === res.value }"
-        @click="selectResolution(res.value)"
-      >
-        {{ res.label }}
-      </div>
-    </div>
-  </div>
-</template>
-
-<!-- 注意：上述 template 代码应合并到主 template 中，请将分辨率菜单放到 player-container 之外，但为了视觉位置，可以放在 player-container 内部底部。实际实现中，请将这部分插入到适当位置。此处为清晰，我们已在 script 中定义了相关变量和函数，模板需包含该部分。 -->
