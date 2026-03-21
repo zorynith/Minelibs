@@ -1,949 +1,603 @@
 <template>
-  <div class="video-app">
-    <!-- 毛玻璃导航栏 -->
-    <header class="glass-navbar">
-      <button class="nav-back" @click="goBack">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <path d="M20 11H7.83L13.42 5.41L12 4L4 12L12 20L13.41 18.59L7.83 13H20V11Z" fill="currentColor"/>
-        </svg>
-      </button>
-      <div class="nav-logo">
-        <img src="https://minelibs.eu.org/Minelibs.png" alt="Logo">
+  <div class="video-page">
+    <!-- 悬浮导航栏 -->
+    <nav class="custom-navbar">
+      <button class="back-btn" @click="goBack">← 返回</button>
+      <div class="logo">
+        <img src="https://minelibs.eu.org/Minelibs.png" alt="Logo" />
       </div>
-      <div class="nav-placeholder"></div>
-    </header>
+      <div class="navbar-placeholder"></div>
+    </nav>
 
-    <!-- 视频卡片区域（粘性） -->
-    <section class="video-card" ref="videoCard">
-      <div class="video-container">
-        <!-- 16:9 视频包装器 -->
-        <div class="video-wrapper" :class="{ 'ratio-fixed': !videoMeta.ready }">
-          <!-- 加载动画 -->
-          <div v-if="!videoMeta.ready || videoMeta.buffering" class="video-overlay loading-overlay">
-            <div class="spinner"></div>
-          </div>
-          <!-- 错误提示 -->
-          <div v-if="videoMeta.error" class="video-overlay error-overlay">
-            <span>视频加载失败</span>
-          </div>
-          <video
-            ref="videoPlayer"
-            class="video-element"
-            :src="currentSource.url"
-            preload="metadata"
-            @timeupdate="onProgress"
-            @loadedmetadata="onMetaLoad"
-            @loadeddata="onDataLoad"
-            @waiting="onWait"
-            @playing="onPlay"
-            @error="onFail"
-            @dblclick="togglePlayback"
-            @mousedown="startLongPress"
-            @mouseup="endLongPress"
-            @mouseleave="cancelLongPress"
-            @click="handleClick"
-          ></video>
-        </div>
-
-        <!-- 控制栏（毛玻璃效果） -->
-        <Transition name="fade">
-          <div v-if="panelVisible" class="control-bar" @mousedown.stop>
-            <!-- 进度条 -->
-            <div class="progress-area" @mousedown="startSeek">
-              <div class="progress-track">
-                <div class="buffer-progress" :style="{ width: bufferPercent + '%' }"></div>
-                <div class="play-progress" :style="{ width: playPercent + '%' }"></div>
-                <div
-                  class="progress-thumb"
-                  :class="{ dragging: seekActive }"
-                  :style="{ left: playPercent + '%' }"
-                  @mousedown.stop="startSeek"
-                ></div>
-              </div>
-            </div>
-
-            <!-- 控制按钮组 -->
-            <div class="control-group">
-              <!-- 播放/暂停 -->
-              <button
-                class="control-btn play-btn"
-                @click="togglePlayback"
-                @mouseenter="playHover = true"
-                @mouseleave="playHover = false"
-              >
-                <svg v-if="videoMeta.paused" width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M8 5v14l11-7z" fill="currentColor" :class="{ 'hover-blue': playHover }"/>
-                </svg>
-                <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <rect x="6" y="5" width="4" height="14" fill="currentColor" :class="{ 'hover-blue': playHover }"/>
-                  <rect x="14" y="5" width="4" height="14" fill="currentColor" :class="{ 'hover-blue': playHover }"/>
-                </svg>
-              </button>
-
-              <span class="time-display">{{ formatTime(currentPos) }} / {{ formatTime(totalDuration) }}</span>
-
-              <div class="flex-spacer"></div>
-
-              <!-- 倍速菜单 -->
-              <div class="menu-wrapper" ref="speedMenu">
-                <button
-                  class="menu-trigger"
-                  :class="{ active: speedHover && !speedClick, clicked: speedClick }"
-                  @click="toggleSpeedMenu"
-                  @mouseenter="speedHover = true"
-                  @mouseleave="speedHover = false"
-                  @mousedown="onSpeedPress"
-                >
-                  {{ speedLabel }}
-                </button>
-                <Transition name="menu-slide">
-                  <div v-if="speedOpen" class="menu-dropdown">
-                    <div
-                      v-for="val in speedOptions"
-                      :key="val"
-                      class="menu-item"
-                      :class="{ selected: selectedSpeed === val }"
-                      @click="setSpeed(val)"
-                    >
-                      {{ val }}x
-                    </div>
-                  </div>
-                </Transition>
-              </div>
-
-              <!-- 分辨率菜单 -->
-              <div class="menu-wrapper" ref="resolutionMenu">
-                <button
-                  class="menu-trigger"
-                  :class="{ active: resHover && !resClick, clicked: resClick }"
-                  @click="toggleResMenu"
-                  @mouseenter="resHover = true"
-                  @mouseleave="resHover = false"
-                  @mousedown="onResPress"
-                >
-                  {{ currentResLabel }}
-                </button>
-                <Transition name="menu-slide">
-                  <div v-if="resOpen" class="menu-dropdown">
-                    <div
-                      v-for="item in resolutionList"
-                      :key="item.value"
-                      class="menu-item"
-                      :class="{ selected: selectedRes === item.value }"
-                      @click="setResolution(item.value)"
-                    >
-                      {{ item.label }}
-                    </div>
-                  </div>
-                </Transition>
-              </div>
-
-              <!-- 全屏按钮 -->
-              <button
-                class="control-btn fullscreen-btn"
-                :class="{ active: fullHover && !fullClick, clicked: fullClick }"
-                @click="toggleFullscreen"
-                @mouseenter="fullHover = true"
-                @mouseleave="fullHover = false"
-                @mousedown="onFullPress"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </Transition>
+    <!-- 视频播放器区域 -->
+    <div class="player-container" ref="playerContainer">
+      <video-player
+        ref="videoPlayer"
+        class="video-player vjs-custom-skin"
+        :options="playerOptions"
+        @ready="onPlayerReady"
+        @play="onPlay"
+        @pause="onPause"
+        @timeupdate="onTimeUpdate"
+        @waiting="onWaiting"
+        @playing="onPlaying"
+        @dblclick="onDblClick"
+      />
+      <!-- 加载动画（缓冲时显示） -->
+      <div v-if="isBuffering && !videoPaused" class="loading-overlay">
+        <div class="loading-spinner"></div>
       </div>
+    </div>
 
-      <!-- 视频标题（位于视频卡片下方） -->
-      <h1 class="video-title">{{ pageHeading }}</h1>
-    </section>
+    <!-- 视频标题 -->
+    <h1 class="video-title">{{ pageTitle }}</h1>
 
-    <!-- 占位元素（防止粘性覆盖） -->
-    <div class="card-placeholder" :style="{ height: cardHeight + 'px' }"></div>
-
-    <!-- 视频选集（卡片网格） -->
-    <div class="playlist-section">
-      <h2 class="playlist-heading">视频选集</h2>
-      <div class="playlist-grid">
-        <div
-          v-for="item in videoCatalog"
-          :key="item.url"
-          class="playlist-card"
+    <!-- 视频选集列表 -->
+    <div class="video-list">
+      <h2>视频选集</h2>
+      <ul>
+        <li
+          v-for="video in videoList"
+          :key="video.url"
           :class="{
-            'active-card': item.url === currentSource.url,
-            'hover-card': hoveredItem === item.url && item.url !== currentSource.url
+            active: video.url === currentVideo.url,
+            hovered: hoveredListItem === video.url && video.url !== currentVideo.url
           }"
-          @click="item.url !== currentSource.url && loadVideo(item)"
-          @mouseenter="hoveredItem = item.url"
-          @mouseleave="hoveredItem = null"
-          @mousedown="onItemPress"
+          @click="video.url !== currentVideo.url && playVideo(video)"
+          @mouseenter="onListItemMouseEnter(video)"
+          @mouseleave="onListItemMouseLeave(video)"
+          @mousedown="onListItemMouseDown"
+          @mouseup="onListItemMouseUp"
         >
-          <div class="card-thumbnail">
-            <svg viewBox="0 0 16 9" width="100%" height="100%">
-              <rect width="16" height="9" fill="#2563eb20" />
-              <text x="8" y="5" text-anchor="middle" fill="#2563eb" font-size="2">▶</text>
-            </svg>
-          </div>
-          <div class="card-title">{{ item.name }}</div>
-        </div>
-      </div>
+          {{ video.name }}
+        </li>
+      </ul>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { useData, useRouter } from 'vitepress'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter, useData } from 'vitepress'
+import 'video.js/dist/video-js.css'
+import { videoPlayer } from 'vue-video-player'
 
-const { frontmatter, page } = useData()
 const router = useRouter()
+const { frontmatter, page } = useData()
 
-// DOM 元素
+// 播放器实例
 const videoPlayer = ref(null)
-const videoCard = ref(null)
-const speedMenu = ref(null)
-const resolutionMenu = ref(null)
+const playerContainer = ref(null)
+let player = null
 
 // 视频状态
-const videoMeta = ref({
-  ready: false,
-  paused: true,
-  buffering: false,
-  error: false
-})
-const currentPos = ref(0)
-const totalDuration = ref(0)
-const bufferPercent = ref(0)
+const currentVideo = ref({ url: '', name: '' })
+const currentTime = ref(0)
+const duration = ref(0)
+const videoPaused = ref(true)
+const isBuffering = ref(false)
+const selectedPlaybackRate = ref(1.0)
+const selectedResolution = ref('720p')
+const speedMenuOpen = ref(false)
+const resolutionMenuOpen = ref(false)
+const speedDropdown = ref(null)
+const resolutionDropdown = ref(null)
 
-// 面板可见性
-const panelVisible = ref(false)
-let panelTimer = null
-let clickTimer = null
+// 按钮悬停/点击状态（仅用于分辨率菜单）
+const resolutionBtnHovered = ref(false)
+const resolutionBtnClicked = ref(false)
+const hoveredListItem = ref(null)
 
-// 长按加速
-let pressTimer = null
-const longPressActive = ref(false)
-const selectedSpeed = ref(1.0)
+// 长按加速定时器
+let longPressTimer = null
+let hideResolutionTimer = null
 
-// 菜单状态
-const speedOpen = ref(false)
-const resOpen = ref(false)
-const speedHover = ref(false)
-const resHover = ref(false)
-const fullHover = ref(false)
-const playHover = ref(false)
-const speedClick = ref(false)
-const resClick = ref(false)
-const fullClick = ref(false)
-
-// 列表悬浮
-const hoveredItem = ref(null)
-
-// 分辨率
-const resolutionList = [
+// 分辨率选项
+const resolutions = [
   { value: '1080p', label: '1080P 高清' },
   { value: '720p', label: '720P 准高清' },
   { value: '480p', label: '480P 标清' },
   { value: '360p', label: '360P 流畅' }
 ]
-const selectedRes = ref('720p')
-const currentResLabel = computed(() => {
-  const found = resolutionList.find(r => r.value === selectedRes.value)
-  return found ? found.label : '720P 准高清'
-})
-
-// 倍速选项
-const speedOptions = ['2.0', '1.5', '1.25', '1.0', '0.75', '0.5']
-
-// 当前视频
-const currentSource = ref({ url: '', name: '' })
 
 // 页面标题
-const pageHeading = computed(() => frontmatter.value.title || currentSource.value.name)
+const pageTitle = computed(() => frontmatter.value.title || currentVideo.value.name)
 
-// 进度百分比
-const playPercent = computed(() => {
-  if (totalDuration.value === 0) return 0
-  return (currentPos.value / totalDuration.value) * 100
+// 分辨率按钮显示文字
+const resolutionButtonText = computed(() => {
+  const res = resolutions.find(r => r.value === selectedResolution.value)
+  return res ? res.label : '720P 准高清'
 })
 
-// 倍速按钮文字
-const speedLabel = computed(() => {
-  if (longPressActive.value) return '3.0x'
-  return selectedSpeed.value === 1.0 ? '倍速' : selectedSpeed.value + 'x'
+// 视频播放器配置
+const playerOptions = ref({
+  autoplay: false,
+  controls: true,               // 显示原生控制栏
+  preload: 'auto',
+  fluid: true,                 // 自适应容器
+  aspectRatio: '16:9',         // 强制 16:9
+  controlBar: {
+    // 保留所有原生控件，但可以通过 children 自定义顺序
+    children: [
+      'playToggle',
+      'currentTimeDisplay',
+      'timeDivider',
+      'durationDisplay',
+      'progressControl',
+      'remainingTimeDisplay',
+      'volumePanel',
+      'playbackRateMenuButton', // 原生倍速菜单
+      'fullscreenToggle'
+    ],
+    volumePanel: { inline: false }
+  },
+  playbackRates: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0], // 原生倍速选项
+  userActions: {
+    hotkeys: true               // 启用热键（空格、左右箭头等）
+  },
+  // 自定义主题色（可选）
+  // 通过 CSS 覆盖即可，不用在此配置
 })
 
-// 时间格式化
-const formatTime = (sec) => {
-  if (isNaN(sec)) return '00:00'
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-}
-
-// 获取视频列表
-const videoFiles = import.meta.glob(
+// ---------- 获取所有视频文件 ----------
+const videoModules = import.meta.glob(
   ['/**/*.mp4', '/**/*.webm', '/**/*.ogg', '/**/*.mov', '/**/*.avi', '/**/*.mkv', '/**/*.flv'],
   { eager: true, as: 'url' }
 )
 
-const currentFolder = computed(() => {
-  const path = page.value.filePath
-  if (!path) return ''
-  const idx = path.lastIndexOf('/')
-  return idx === -1 ? '' : path.substring(0, idx + 1)
+const currentDir = computed(() => {
+  const filePath = page.value.filePath
+  if (!filePath) return ''
+  const lastSlash = filePath.lastIndexOf('/')
+  if (lastSlash === -1) return ''
+  return filePath.substring(0, lastSlash + 1)
 })
 
-const videoCatalog = computed(() => {
-  const folder = currentFolder.value
-  if (!folder) return []
+const videoList = computed(() => {
+  const dir = currentDir.value
+  if (!dir) return []
   const list = []
-  for (const [fullPath, url] of Object.entries(videoFiles)) {
-    const rel = fullPath.startsWith('/') ? fullPath.slice(1) : fullPath
-    if (rel.startsWith(folder)) {
-      const name = fullPath.split('/').pop().replace(/\.[^/.]+$/, '')
-      list.push({ url, name })
+  for (const [filePath, url] of Object.entries(videoModules)) {
+    const relativePath = filePath.startsWith('/') ? filePath.slice(1) : filePath
+    if (relativePath.startsWith(dir)) {
+      const fileName = filePath.split('/').pop().replace(/\.[^/.]+$/, '')
+      list.push({ url, name: fileName })
     }
   }
   return list
 })
 
-// 初始化视频
-const initVideo = () => {
-  const catalog = videoCatalog.value
-  if (!catalog.length) return
-  let target = catalog[0]
+// 播放指定视频
+const playVideo = (videoItem) => {
+  if (currentVideo.value.url === videoItem.url) return
+  currentVideo.value = videoItem
+  if (player) {
+    player.src(videoItem.url)
+    player.load()
+    player.play()
+  }
+}
+
+// 初始化当前视频
+const initCurrentVideo = () => {
+  const list = videoList.value
+  if (list.length === 0) return
+  let initialVideo = list[0]
   if (frontmatter.value.video) {
-    const match = catalog.find(v => v.url.endsWith('/' + frontmatter.value.video) || v.name === frontmatter.value.video)
-    if (match) target = match
+    const matched = list.find(v => v.url.endsWith('/' + frontmatter.value.video) || v.name === frontmatter.value.video)
+    if (matched) initialVideo = matched
   }
-  currentSource.value = target
+  currentVideo.value = initialVideo
 }
-watch(videoCatalog, initVideo, { immediate: true })
 
-// 加载视频
-const loadVideo = (item) => {
-  currentSource.value = item
-  videoMeta.value = { ready: false, paused: true, buffering: false, error: false }
-  currentPos.value = 0
-  totalDuration.value = 0
-  nextTick(() => {
-    const v = videoPlayer.value
-    if (!v) return
-    v.load()
-    v.play().catch(() => {})
+watch(videoList, initCurrentVideo, { immediate: true })
+
+// 播放器准备就绪
+const onPlayerReady = (playerInstance) => {
+  player = playerInstance
+  player.src(currentVideo.value.url)
+  player.load()
+  // 设置初始倍速
+  player.playbackRate(selectedPlaybackRate.value)
+  // 监听倍速变化（原生控件改变时同步）
+  player.on('ratechange', () => {
+    selectedPlaybackRate.value = player.playbackRate()
   })
-  showPanel()
+  // 监听全屏变化（可选）
+  player.on('fullscreenchange', () => {})
+  // 监听播放暂停
+  player.on('play', () => { videoPaused.value = false })
+  player.on('pause', () => { videoPaused.value = true })
+  player.on('timeupdate', () => { currentTime.value = player.currentTime() })
+  player.on('loadedmetadata', () => { duration.value = player.duration() })
+  player.on('waiting', () => { isBuffering.value = true })
+  player.on('playing', () => { isBuffering.value = false })
 }
 
-// 视频事件
-const onProgress = () => {
-  const v = videoPlayer.value
-  if (!v) return
-  currentPos.value = v.currentTime
-  if (v.buffered.length) {
-    for (let i = 0; i < v.buffered.length; i++) {
-      if (v.currentTime >= v.buffered.start(i) && v.currentTime <= v.buffered.end(i)) {
-        bufferPercent.value = (v.buffered.end(i) / v.duration) * 100
-        break
-      }
-    }
-  }
-}
-const onMetaLoad = () => { totalDuration.value = videoPlayer.value?.duration || 0 }
-const onDataLoad = () => {
-  videoMeta.value.ready = true
-  videoMeta.value.buffering = false
-  updateCardHeight()
-}
-const onWait = () => { videoMeta.value.buffering = true }
-const onPlay = () => { videoMeta.value.paused = false; videoMeta.value.buffering = false }
-const onFail = () => { videoMeta.value.error = true; videoMeta.value.ready = false }
+const onPlay = () => { videoPaused.value = false }
+const onPause = () => { videoPaused.value = true }
+const onTimeUpdate = () => { if (player) currentTime.value = player.currentTime() }
+const onWaiting = () => { isBuffering.value = true }
+const onPlaying = () => { isBuffering.value = false }
 
-// 播放控制
-const togglePlayback = () => {
-  const v = videoPlayer.value
-  if (!v || videoMeta.value.error) return
-  if (v.paused) {
-    v.play().catch(() => {})
+// 双击暂停/播放（覆盖原生双击全屏行为）
+const onDblClick = (event) => {
+  // 阻止原生双击全屏
+  event.preventDefault()
+  if (player.paused()) {
+    player.play()
   } else {
-    v.pause()
+    player.pause()
   }
-  videoMeta.value.paused = v.paused
-  resetPanelTimer()
 }
 
-// 长按加速
-const startLongPress = () => {
-  if (!videoPlayer.value || videoMeta.value.error) return
-  pressTimer = setTimeout(() => {
-    longPressActive.value = true
-    if (videoPlayer.value) videoPlayer.value.playbackRate = 3.0
+// 长按加速（长按 500ms 后倍速变为 3.0，松开恢复）
+let isLongPressing = false
+const onMouseDown = () => {
+  if (!player) return
+  longPressTimer = setTimeout(() => {
+    isLongPressing = true
+    // 记录原倍速
+    const originalRate = player.playbackRate()
+    player.playbackRate(3.0)
+    // 保存原倍速，待松开时恢复
+    window.__originalPlaybackRate = originalRate
   }, 500)
 }
-const endLongPress = () => {
-  if (pressTimer) clearTimeout(pressTimer)
-  if (longPressActive.value) {
-    longPressActive.value = false
-    if (videoPlayer.value) videoPlayer.value.playbackRate = selectedSpeed.value
+const onMouseUp = () => {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
   }
-}
-const cancelLongPress = endLongPress
-
-// 单击处理
-const handleClick = () => {
-  if (clickTimer) clearTimeout(clickTimer)
-  clickTimer = setTimeout(() => {
-    panelVisible.value = !panelVisible.value
-    if (panelVisible.value) {
-      resetPanelTimer()
-    } else {
-      if (panelTimer) clearTimeout(panelTimer)
+  if (isLongPressing) {
+    isLongPressing = false
+    const originalRate = window.__originalPlaybackRate
+    if (originalRate !== undefined) {
+      player.playbackRate(originalRate)
+      selectedPlaybackRate.value = originalRate
+      delete window.__originalPlaybackRate
     }
-    clickTimer = null
-  }, 250)
-}
-
-// 进度条拖动（修复：立即响应点击和拖动）
-let seeking = false
-const seekActive = ref(false)
-const startSeek = (e) => {
-  e.preventDefault()
-  e.stopPropagation()
-  // 确保视频已加载元数据，否则无法跳转
-  if (totalDuration.value <= 0 || !videoPlayer.value) return
-
-  panelVisible.value = true
-  seeking = true
-  seekActive.value = true
-  resetPanelTimer()
-
-  // 获取进度条容器（可能是 .progress-track 或当前元素）
-  const track = e.currentTarget.querySelector('.progress-track') || e.currentTarget
-
-  // 根据鼠标位置更新视频时间的函数
-  const updateTimeFromEvent = (clientX) => {
-    const rect = track.getBoundingClientRect()
-    let percent = (clientX - rect.left) / rect.width
-    percent = Math.max(0, Math.min(1, percent))
-    videoPlayer.value.currentTime = percent * totalDuration.value
   }
+}
+const onMouseLeave = () => {
+  onMouseUp()
+}
 
-  // 立即执行一次，让点击时跳转
-  updateTimeFromEvent(e.clientX)
-
-  // 监听移动和松开
-  const onMove = (ev) => {
-    ev.preventDefault()
-    updateTimeFromEvent(ev.clientX)
-    resetPanelTimer()
+// 分辨率切换（改变视频源）
+const selectResolution = (res) => {
+  selectedResolution.value = res
+  resolutionMenuOpen.value = false
+  // 这里可以根据分辨率切换不同的视频源，但需要预先准备不同分辨率的视频文件
+  // 简单起见，我们假设同一视频有多种分辨率文件，命名规则如：video_1080p.mp4
+  // 根据当前视频的基础名，拼接分辨率后缀
+  if (player) {
+    const baseName = currentVideo.value.url.replace(/\.[^/.]+$/, '')
+    const ext = currentVideo.value.url.match(/\.[^/.]+$/)[0]
+    const newUrl = `${baseName}_${res}${ext}`
+    // 检查文件是否存在，如果存在则切换，否则提示或不做处理
+    // 由于无法在客户端直接检查文件是否存在，这里简单尝试切换，若失败则忽略
+    player.src(newUrl)
+    player.load()
+    player.play()
   }
-  const onUp = () => {
-    seeking = false
-    seekActive.value = false
-    document.removeEventListener('mousemove', onMove)
-    document.removeEventListener('mouseup', onUp)
-    // 松开后重置定时器
-    resetPanelTimer()
+}
+
+// 分辨率下拉菜单显示/隐藏
+const toggleResolutionMenu = () => {
+  resolutionMenuOpen.value = !resolutionMenuOpen.value
+  if (resolutionMenuOpen.value) {
+    // 自动隐藏菜单的定时器（可选）
+    if (hideResolutionTimer) clearTimeout(hideResolutionTimer)
+    hideResolutionTimer = setTimeout(() => {
+      resolutionMenuOpen.value = false
+    }, 5000)
   }
-
-  document.addEventListener('mousemove', onMove)
-  document.addEventListener('mouseup', onUp)
 }
 
-// 面板自动隐藏
-const resetPanelTimer = () => {
-  if (panelTimer) clearTimeout(panelTimer)
-  panelTimer = setTimeout(() => {
-    if (!seeking && !speedOpen.value && !resOpen.value) {
-      panelVisible.value = false
-    }
-  }, 5000)
-}
-const showPanel = () => {
-  panelVisible.value = true
-  resetPanelTimer()
-}
-
-// 倍速选择
-const setSpeed = (val) => {
-  const num = parseFloat(val)
-  selectedSpeed.value = num
-  if (!longPressActive.value) {
-    if (videoPlayer.value) videoPlayer.value.playbackRate = num
+// 点击外部关闭分辨率菜单
+const handleClickOutside = (e) => {
+  if (resolutionDropdown.value && !resolutionDropdown.value.contains(e.target)) {
+    resolutionMenuOpen.value = false
   }
-  speedOpen.value = false
-  resetPanelTimer()
 }
-
-// 分辨率选择
-const setResolution = (val) => {
-  selectedRes.value = val
-  resOpen.value = false
-  resetPanelTimer()
-}
-
-// 菜单切换
-const toggleSpeedMenu = () => {
-  speedOpen.value = !speedOpen.value
-  resOpen.value = false
-  resetPanelTimer()
-}
-const toggleResMenu = () => {
-  resOpen.value = !resOpen.value
-  speedOpen.value = false
-  resetPanelTimer()
-}
-
-// 按钮点击效果
-const onSpeedPress = () => {
-  speedClick.value = true
-  setTimeout(() => { if (!speedHover.value) speedClick.value = false }, 300)
-}
-const onResPress = () => {
-  resClick.value = true
-  setTimeout(() => { if (!resHover.value) resClick.value = false }, 300)
-}
-const onFullPress = () => {
-  fullClick.value = true
-  setTimeout(() => { if (!fullHover.value) fullClick.value = false }, 300)
-}
-const onItemPress = () => {}
-
-// 全屏
-const toggleFullscreen = () => {
-  if (!videoCard.value) return
-  if (document.fullscreenElement) {
-    document.exitFullscreen()
-  } else {
-    videoCard.value.requestFullscreen()
-  }
-  resetPanelTimer()
-}
-
-// 返回上一级
-const goBack = () => window.history.back()
-
-// 点击外部关闭菜单
-const handleOutsideClick = (e) => {
-  if (speedMenu.value && !speedMenu.value.contains(e.target)) speedOpen.value = false
-  if (resolutionMenu.value && !resolutionMenu.value.contains(e.target)) resOpen.value = false
-}
-
-// 粘性卡片占位高度（确保视频列表不被覆盖）
-const cardHeight = ref(0)
-const updateCardHeight = () => {
-  if (!videoCard.value) return
-  requestAnimationFrame(() => {
-    const height = videoCard.value.getBoundingClientRect().height
-    cardHeight.value = height
-  })
-}
-// 强制多次更新，确保初始布局正确
-const ensureCardHeight = () => {
-  updateCardHeight()
-  setTimeout(updateCardHeight, 50)
-  setTimeout(updateCardHeight, 200)
-  setTimeout(updateCardHeight, 500)
-}
-
-// 生命周期
 onMounted(() => {
-  document.addEventListener('click', handleOutsideClick)
-  ensureCardHeight()
-  window.addEventListener('resize', updateCardHeight)
-  const obs = new ResizeObserver(() => { updateCardHeight() })
-  if (videoCard.value) obs.observe(videoCard.value)
-  onBeforeUnmount(() => {
-    document.removeEventListener('click', handleOutsideClick)
-    window.removeEventListener('resize', updateCardHeight)
-    obs.disconnect()
-    clearTimeout(panelTimer)
-    clearTimeout(pressTimer)
-    clearTimeout(clickTimer)
-  })
+  document.addEventListener('click', handleClickOutside)
+  // 监听视频容器鼠标事件以实现长按加速
+  if (playerContainer.value) {
+    playerContainer.value.addEventListener('mousedown', onMouseDown)
+    playerContainer.value.addEventListener('mouseup', onMouseUp)
+    playerContainer.value.addEventListener('mouseleave', onMouseLeave)
+  }
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleClickOutside)
+  if (playerContainer.value) {
+    playerContainer.value.removeEventListener('mousedown', onMouseDown)
+    playerContainer.value.removeEventListener('mouseup', onMouseUp)
+    playerContainer.value.removeEventListener('mouseleave', onMouseLeave)
+  }
+  if (player) {
+    player.dispose()
+  }
 })
 
-// 监听可能影响高度的变化
-watch([() => videoMeta.value.ready, currentSource, panelVisible], () => {
-  nextTick(updateCardHeight)
-})
+// 分辨率按钮鼠标效果
+const onResolutionMouseEnter = () => { resolutionBtnHovered.value = true }
+const onResolutionMouseLeave = () => { resolutionBtnHovered.value = false }
+const onResolutionMouseDown = () => {
+  resolutionBtnClicked.value = true
+  setTimeout(() => {
+    if (!resolutionBtnHovered.value) resolutionBtnClicked.value = false
+  }, 300)
+}
+const onResolutionMouseUp = () => {}
+
+// 列表项效果
+const onListItemMouseEnter = (video) => { hoveredListItem.value = video.url }
+const onListItemMouseLeave = (video) => {
+  if (hoveredListItem.value === video.url) hoveredListItem.value = null
+}
+const onListItemMouseDown = () => {}
+const onListItemMouseUp = () => {}
+
+// 返回上一页
+const goBack = () => {
+  window.history.back()
+}
 </script>
 
 <style scoped>
-/* 全局滚动隐藏 */
-:global(html), :global(body) {
+/* 隐藏全局滚动条 */
+:global(html),
+:global(body) {
   overflow: hidden;
   height: 100%;
   margin: 0;
   padding: 0;
-  background: #f8f9fa;
 }
-.video-app {
+
+.video-page {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #fff;
   height: 100vh;
   overflow-y: auto;
-  background: #f8f9fa;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-.video-app::-webkit-scrollbar {
+.video-page::-webkit-scrollbar {
   display: none;
 }
 
-/* 毛玻璃导航 */
-.glass-navbar {
+/* 悬浮导航栏 */
+.custom-navbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 64px;
-  background: rgba(255,255,255,0.85);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  height: 60px;
+  background-color: white;
+  border-bottom: 1px solid #eee;
   display: flex;
   align-items: center;
-  padding: 0 24px;
+  padding: 0 20px;
   z-index: 100;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
-.nav-back {
+
+.back-btn {
   background: none;
   border: none;
-  color: #2c3e50;
+  font-size: 16px;
+  color: #333;
   cursor: pointer;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: background 0.2s;
+  width: 60px;
+  text-align: left;
 }
-.nav-back:hover {
-  background: rgba(37,99,235,0.1);
-  color: #2563eb;
-}
-.nav-logo {
+
+.logo {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
 }
-.nav-logo img {
-  height: 48px;
+
+.logo img {
+  height: 60px;
   width: auto;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
-}
-.nav-placeholder {
-  width: 40px;
+  pointer-events: none;
 }
 
-/* 视频卡片 */
-.video-card {
+.navbar-placeholder {
+  width: 60px;
+}
+
+/* 视频播放器区域 */
+.player-container {
   position: sticky;
-  top: 64px;
+  top: 60px;
   z-index: 90;
-  background: white;
+  background-color: #000;
   width: 100%;
-  overflow: visible;
-  border-radius: 0 0 24px 24px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.05);
+  overflow: hidden;
 }
-.video-container {
-  position: relative;
+
+/* 覆盖 video.js 默认样式，使其适应容器 */
+.video-player {
   width: 100%;
-  background: black;
-  border-radius: 0;
+  height: auto;
 }
-.video-wrapper {
-  position: relative;
-  width: 100%;
-  background: black;
-}
-.video-wrapper.ratio-fixed {
+.video-js {
+  width: 100% !important;
+  height: auto !important;
   aspect-ratio: 16 / 9;
 }
-.video-element {
-  display: block;
+/* 自定义加载动画覆盖层 */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;
-}
-.video-overlay {
-  position: absolute;
-  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0,0,0,0.5);
+  background-color: rgba(0,0,0,0.5);
   z-index: 20;
   pointer-events: none;
 }
-.loading-overlay .spinner {
-  width: 48px;
-  height: 48px;
-  border: 4px solid rgba(255,255,255,0.2);
-  border-top: 4px solid #2563eb;
+.loading-spinner {
+  width: 50px;
+  height: 50px;
+  border: 5px solid rgba(255,255,255,0.3);
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  border-top-color: #2563eb;
+  animation: spin 1s ease-in-out infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
-.error-overlay span {
-  color: white;
-  font-size: 16px;
-  background: rgba(0,0,0,0.7);
-  padding: 8px 16px;
-  border-radius: 40px;
-}
-
-/* 控制栏 */
-.fade-enter-active, .fade-leave-active { transition: opacity 0.25s; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-.control-bar {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  padding: 16px 20px 12px;
-  z-index: 30;
-}
-.progress-area {
-  margin-bottom: 12px;
-  cursor: pointer;
-}
-.progress-track {
-  position: relative;
-  height: 4px;
-  background: rgba(255,255,255,0.2);
-  border-radius: 4px;
-  transition: height 0.2s;
-}
-.progress-area:hover .progress-track {
-  height: 6px;
-}
-.buffer-progress {
-  position: absolute;
-  height: 100%;
-  background: rgba(255,255,255,0.3);
-  border-radius: 4px;
-  pointer-events: none;
-}
-.play-progress {
-  position: absolute;
-  height: 100%;
-  background: #2563eb;
-  border-radius: 4px;
-  pointer-events: none;
-}
-.progress-thumb {
-  position: absolute;
-  top: 50%;
-  width: 14px;
-  height: 14px;
-  background: #2563eb;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s, transform 0.2s;
-}
-.progress-area:hover .progress-thumb {
-  opacity: 1;
-}
-.progress-thumb.dragging {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1.5);
-}
-.control-group {
-  display: flex;
-  align-items: center;
-  color: white;
-  font-size: 14px;
-}
-.control-btn {
-  background: none;
-  border: none;
-  color: white;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 50%;
-  transition: background 0.2s, color 0.2s, transform 0.2s;
-}
-.control-btn:hover {
-  background: rgba(255,255,255,0.1);
-}
-.control-btn.active {
-  color: #2563eb;
-}
-.control-btn.clicked {
-  transform: scale(0.9);
-}
-.play-btn {
-  margin-right: 12px;
-}
-.hover-blue {
-  fill: #2563eb;
-}
-.time-display {
-  margin-right: 16px;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255,255,255,0.9);
-}
-.flex-spacer {
-  flex: 1;
-}
-
-/* 下拉菜单 */
-.menu-wrapper {
-  position: relative;
-  margin: 0 8px;
-}
-.menu-trigger {
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.2);
-  color: white;
-  font-weight: 500;
-  padding: 6px 14px;
-  border-radius: 30px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background 0.2s, color 0.2s, transform 0.2s;
-  backdrop-filter: blur(4px);
-}
-.menu-trigger.active {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: white;
-}
-.menu-trigger.clicked {
-  transform: scale(0.95);
-}
-.menu-slide-enter-active, .menu-slide-leave-active {
-  transition: opacity 0.2s, transform 0.2s;
-}
-.menu-slide-enter-from, .menu-slide-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
-}
-.menu-dropdown {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-bottom: 8px;
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 12px 28px rgba(0,0,0,0.2);
-  min-width: 130px;
-  z-index: 200;
-  overflow: hidden;
-  padding: 6px 0;
-}
-.menu-item {
-  padding: 10px 16px;
-  cursor: pointer;
-  color: #1e293b;
-  font-size: 14px;
-  text-align: center;
-  transition: background 0.2s, color 0.2s;
-  border-bottom: 1px solid #f1f5f9;
-}
-.menu-item:last-child {
-  border-bottom: none;
-}
-.menu-item:hover {
-  background: #f1f5f9;
-}
-.menu-item.selected {
-  background: #2563eb;
-  color: white;
-}
-.fullscreen-btn {
-  margin-left: 8px;
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* 视频标题 */
 .video-title {
-  font-size: 28px;
-  font-weight: 700;
-  color: #0f172a;
+  font-size: 24px;
+  font-weight: bold;
+  color: #333;
   margin: 0;
-  padding: 24px 24px 20px;
-  background: white;
-  border-top: 1px solid #eef2f6;
-  letter-spacing: -0.01em;
+  padding: 15px 20px;
+  border-top: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #fff;
 }
 
-/* 占位块 */
-.card-placeholder {
-  width: 100%;
-  transition: height 0.2s;
+/* 视频选集列表 */
+.video-list {
+  margin: 0 20px 20px;
 }
-
-/* 播放列表 */
-.playlist-section {
-  padding: 0 24px 40px;
+.video-list h2 {
+  font-size: 18px;
+  color: #666;
+  margin-bottom: 10px;
 }
-.playlist-heading {
-  font-size: 20px;
-  font-weight: 600;
-  color: #0f172a;
-  margin: 0 0 20px 0;
-}
-.playlist-grid {
+.video-list ul {
+  list-style: none;
+  padding: 0;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
+  gap: 10px;
 }
-.playlist-card {
-  background: white;
-  border-radius: 20px;
-  overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
-  transition: transform 0.25s, box-shadow 0.25s, background 0.2s;
+.video-list li {
+  padding: 12px 16px;
+  background-color: #f5f5f5;
+  border-radius: 12px;
   cursor: pointer;
-  border: 1px solid #f0f0f0;
-}
-.playlist-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 20px 30px rgba(37,99,235,0.1);
-}
-.playlist-card.active-card {
-  background: #2563eb;
-  color: white;
-  border-color: #2563eb;
-}
-.playlist-card.hover-card {
-  background: #2563eb;
-  color: white;
-  border-color: #2563eb;
-}
-.playlist-card:active {
-  transform: scale(0.98);
-}
-.card-thumbnail {
-  aspect-ratio: 16 / 9;
-  background: #eef2f6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.card-title {
-  padding: 14px 12px;
-  font-weight: 500;
-  font-size: 15px;
+  transition: all 0.2s ease;
+  color: #333;
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: center;
 }
-.active-card .card-title,
-.hover-card .card-title {
+.video-list li.active {
+  background-color: #2563eb;
+  color: white;
+  cursor: default;
+  pointer-events: none;
+}
+.video-list li:not(.active).hovered {
+  background-color: #2563eb;
+  color: white;
+}
+.video-list li:not(.active):active {
+  transform: scale(0.98);
+}
+
+/* 分辨率自定义菜单（放在视频区域外，与播放器同级） */
+.resolution-dropdown {
+  position: absolute;
+  bottom: 70px;
+  right: 20px;
+  z-index: 200;
+}
+.resolution-btn {
+  background: rgba(0,0,0,0.7);
+  color: white;
+  border: none;
+  font-weight: bold;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.2s, background 0.2s;
+}
+.resolution-btn.hovered {
+  background: rgba(0,0,0,0.9);
+  color: #2563eb;
+}
+.resolution-btn.clicked {
+  transform: scale(0.98);
+}
+.resolution-menu {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 5px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 120px;
+  overflow: hidden;
+}
+.resolution-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: #333;
+  font-size: 14px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background 0.2s;
+}
+.resolution-item:last-child {
+  border-bottom: none;
+}
+.resolution-item:hover {
+  background-color: #e6f7ff;
+}
+.resolution-item.active {
+  background-color: #2563eb;
   color: white;
 }
 </style>
+
+<!-- 添加自定义分辨率菜单（在模板末尾） -->
+<template>
+  <!-- ... 原有内容 ... -->
+  <div class="resolution-dropdown" ref="resolutionDropdown">
+    <button
+      class="resolution-btn"
+      :class="{
+        hovered: resolutionBtnHovered && !resolutionBtnClicked,
+        clicked: resolutionBtnClicked
+      }"
+      @click="toggleResolutionMenu"
+      @mouseenter="onResolutionMouseEnter"
+      @mouseleave="onResolutionMouseLeave"
+      @mousedown="onResolutionMouseDown"
+      @mouseup="onResolutionMouseUp"
+    >
+      {{ resolutionButtonText }}
+    </button>
+    <div v-if="resolutionMenuOpen" class="resolution-menu">
+      <div
+        v-for="res in resolutions"
+        :key="res.value"
+        class="resolution-item"
+        :class="{ active: selectedResolution === res.value }"
+        @click="selectResolution(res.value)"
+      >
+        {{ res.label }}
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- 注意：上述 template 代码应合并到主 template 中，请将分辨率菜单放到 player-container 之外，但为了视觉位置，可以放在 player-container 内部底部。实际实现中，请将这部分插入到适当位置。此处为清晰，我们已在 script 中定义了相关变量和函数，模板需包含该部分。 -->
