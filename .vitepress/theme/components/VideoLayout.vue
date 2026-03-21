@@ -89,13 +89,13 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useData } from 'vitepress'
 import 'video.js/dist/video-js.css'
-import { videoPlayer as VideoPlayer } from 'vue-video-player'
+import { videoPlayer } from 'vue-video-player'
 
 const router = useRouter()
 const { frontmatter, page } = useData()
 
 // 播放器实例引用
-const playerRef = ref(null)
+const playerRef = ref(null)  // 重命名，避免与导入的 videoPlayer 冲突
 const playerContainer = ref(null)
 let player = null
 
