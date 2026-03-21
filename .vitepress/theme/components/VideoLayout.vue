@@ -12,7 +12,7 @@
     <!-- 视频播放器区域 -->
     <div class="player-container" ref="playerContainer">
       <video-player
-        ref="videoPlayer"
+        ref="playerRef"
         class="video-player vjs-custom-skin"
         :options="playerOptions"
         @ready="onPlayerReady"
@@ -28,7 +28,7 @@
         <div class="loading-spinner"></div>
       </div>
 
-      <!-- 自定义分辨率菜单（放置于播放器区域内，便于定位） -->
+      <!-- 自定义分辨率菜单 -->
       <div class="resolution-dropdown" ref="resolutionDropdown">
         <button
           class="resolution-btn"
@@ -89,13 +89,13 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useData } from 'vitepress'
 import 'video.js/dist/video-js.css'
-import { videoPlayer } from 'vue-video-player'
+import { videoPlayer as VideoPlayer } from 'vue-video-player'
 
 const router = useRouter()
 const { frontmatter, page } = useData()
 
-// 播放器实例
-const videoPlayer = ref(null)
+// 播放器实例引用
+const playerRef = ref(null)
 const playerContainer = ref(null)
 let player = null
 
@@ -115,7 +115,7 @@ const resolutionBtnHovered = ref(false)
 const resolutionBtnClicked = ref(false)
 const hoveredListItem = ref(null)
 
-// 长按加速定时器
+// 定时器
 let longPressTimer = null
 let hideResolutionTimer = null
 
@@ -130,13 +130,13 @@ const resolutions = [
 // 页面标题
 const pageTitle = computed(() => frontmatter.value.title || currentVideo.value.name)
 
-// 分辨率按钮显示文字
+// 分辨率按钮文字
 const resolutionButtonText = computed(() => {
   const res = resolutions.find(r => r.value === selectedResolution.value)
   return res ? res.label : '720P 准高清'
 })
 
-// 视频播放器配置
+// 播放器配置
 const playerOptions = ref({
   autoplay: false,
   controls: true,
@@ -158,9 +158,7 @@ const playerOptions = ref({
     volumePanel: { inline: false }
   },
   playbackRates: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0],
-  userActions: {
-    hotkeys: true
-  }
+  userActions: { hotkeys: true }
 })
 
 // ---------- 获取所有视频文件 ----------
@@ -191,7 +189,7 @@ const videoList = computed(() => {
   return list
 })
 
-// 播放指定视频
+// 播放视频
 const playVideo = (videoItem) => {
   if (currentVideo.value.url === videoItem.url) return
   currentVideo.value = videoItem
@@ -216,7 +214,7 @@ const initCurrentVideo = () => {
 
 watch(videoList, initCurrentVideo, { immediate: true })
 
-// 播放器准备就绪
+// 播放器就绪
 const onPlayerReady = (playerInstance) => {
   player = playerInstance
   player.src(currentVideo.value.url)
@@ -293,7 +291,7 @@ const selectResolution = (res) => {
   }
 }
 
-// 分辨率下拉菜单显示/隐藏
+// 切换分辨率菜单
 const toggleResolutionMenu = () => {
   resolutionMenuOpen.value = !resolutionMenuOpen.value
   if (resolutionMenuOpen.value) {
@@ -304,7 +302,7 @@ const toggleResolutionMenu = () => {
   }
 }
 
-// 点击外部关闭分辨率菜单
+// 点击外部关闭菜单
 const handleClickOutside = (e) => {
   if (resolutionDropdown.value && !resolutionDropdown.value.contains(e.target)) {
     resolutionMenuOpen.value = false
@@ -431,7 +429,7 @@ const goBack = () => {
   overflow: visible;
 }
 
-/* 覆盖 video.js 样式，使其适应容器 */
+/* 覆盖 video.js 样式 */
 .video-player {
   width: 100%;
   height: auto;
@@ -468,7 +466,7 @@ const goBack = () => {
   to { transform: rotate(360deg); }
 }
 
-/* 自定义分辨率菜单（位于播放器右下角） */
+/* 分辨率菜单 */
 .resolution-dropdown {
   position: absolute;
   bottom: 70px;
@@ -535,7 +533,7 @@ const goBack = () => {
   background-color: #fff;
 }
 
-/* 视频选集列表 */
+/* 视频选集 */
 .video-list {
   margin: 0 20px 20px;
 }
