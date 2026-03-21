@@ -11,8 +11,8 @@
 
     <!-- 视频播放器区域 -->
     <div class="player-container" ref="playerContainer">
-      <VideoPlayer
-        ref="playerInstance"
+      <VideoPlayerComponent
+        ref="playerRef"
         class="video-player vjs-custom-skin"
         :options="playerOptions"
         @ready="onPlayerReady"
@@ -91,18 +91,13 @@ import { useRouter, useData } from 'vitepress'
 import 'video.js/dist/video-js.css'
 import { videoPlayer as VideoPlayerComponent } from 'vue-video-player'
 
-// 由于在模板中使用的是 <VideoPlayer>，我们需要将其注册为组件
-// 在 setup 中，我们可以通过 defineComponent 或直接使用 components 选项
-// 为了简单，我们直接定义组件并暴露
-const VideoPlayer = VideoPlayerComponent
-
 const router = useRouter()
 const { frontmatter, page } = useData()
 
-// 播放器实例引用
-const playerInstance = ref(null)
+// 播放器相关引用
+const playerRef = ref(null)         // Vue 组件 ref
 const playerContainer = ref(null)
-let player = null
+let playerInstance = null           // video.js 实例
 
 // 视频状态
 const currentVideo = ref({ url: '', name: '' })
@@ -115,7 +110,7 @@ const selectedResolution = ref('720p')
 const resolutionMenuOpen = ref(false)
 const resolutionDropdown = ref(null)
 
-// 按钮悬停/点击状态
+// UI 状态
 const resolutionBtnHovered = ref(false)
 const resolutionBtnClicked = ref(false)
 const hoveredListItem = ref(null)
@@ -198,10 +193,10 @@ const videoList = computed(() => {
 const playVideo = (videoItem) => {
   if (currentVideo.value.url === videoItem.url) return
   currentVideo.value = videoItem
-  if (player) {
-    player.src(videoItem.url)
-    player.load()
-    player.play()
+  if (playerInstance) {
+    playerInstance.src(videoItem.url)
+    playerInstance.load()
+    playerInstance.play()
   }
 }
 
@@ -219,47 +214,47 @@ const initCurrentVideo = () => {
 
 watch(videoList, initCurrentVideo, { immediate: true })
 
-// 播放器就绪
-const onPlayerReady = (playerInstance) => {
-  player = playerInstance
-  player.src(currentVideo.value.url)
-  player.load()
-  player.playbackRate(selectedPlaybackRate.value)
-  player.on('ratechange', () => {
-    selectedPlaybackRate.value = player.playbackRate()
+// 播放器就绪回调
+const onPlayerReady = (player) => {
+  playerInstance = player
+  playerInstance.src(currentVideo.value.url)
+  playerInstance.load()
+  playerInstance.playbackRate(selectedPlaybackRate.value)
+  playerInstance.on('ratechange', () => {
+    selectedPlaybackRate.value = playerInstance.playbackRate()
   })
-  player.on('play', () => { videoPaused.value = false })
-  player.on('pause', () => { videoPaused.value = true })
-  player.on('timeupdate', () => { currentTime.value = player.currentTime() })
-  player.on('loadedmetadata', () => { duration.value = player.duration() })
-  player.on('waiting', () => { isBuffering.value = true })
-  player.on('playing', () => { isBuffering.value = false })
+  playerInstance.on('play', () => { videoPaused.value = false })
+  playerInstance.on('pause', () => { videoPaused.value = true })
+  playerInstance.on('timeupdate', () => { currentTime.value = playerInstance.currentTime() })
+  playerInstance.on('loadedmetadata', () => { duration.value = playerInstance.duration() })
+  playerInstance.on('waiting', () => { isBuffering.value = true })
+  playerInstance.on('playing', () => { isBuffering.value = false })
 }
 
 const onPlay = () => { videoPaused.value = false }
 const onPause = () => { videoPaused.value = true }
-const onTimeUpdate = () => { if (player) currentTime.value = player.currentTime() }
+const onTimeUpdate = () => { if (playerInstance) currentTime.value = playerInstance.currentTime() }
 const onWaiting = () => { isBuffering.value = true }
 const onPlaying = () => { isBuffering.value = false }
 
 // 双击暂停/播放
 const onDblClick = (event) => {
   event.preventDefault()
-  if (player.paused()) {
-    player.play()
+  if (playerInstance.paused()) {
+    playerInstance.play()
   } else {
-    player.pause()
+    playerInstance.pause()
   }
 }
 
 // 长按加速
 let isLongPressing = false
 const onMouseDown = () => {
-  if (!player) return
+  if (!playerInstance) return
   longPressTimer = setTimeout(() => {
     isLongPressing = true
-    const originalRate = player.playbackRate()
-    player.playbackRate(3.0)
+    const originalRate = playerInstance.playbackRate()
+    playerInstance.playbackRate(3.0)
     window.__originalPlaybackRate = originalRate
   }, 500)
 }
@@ -272,7 +267,7 @@ const onMouseUp = () => {
     isLongPressing = false
     const originalRate = window.__originalPlaybackRate
     if (originalRate !== undefined) {
-      player.playbackRate(originalRate)
+      playerInstance.playbackRate(originalRate)
       selectedPlaybackRate.value = originalRate
       delete window.__originalPlaybackRate
     }
@@ -282,17 +277,17 @@ const onMouseLeave = () => {
   onMouseUp()
 }
 
-// 分辨率切换
+// 分辨率切换（假设视频文件名格式：basename_1080p.mp4 等）
 const selectResolution = (res) => {
   selectedResolution.value = res
   resolutionMenuOpen.value = false
-  if (player) {
+  if (playerInstance) {
     const baseName = currentVideo.value.url.replace(/\.[^/.]+$/, '')
     const ext = currentVideo.value.url.match(/\.[^/.]+$/)[0]
     const newUrl = `${baseName}_${res}${ext}`
-    player.src(newUrl)
-    player.load()
-    player.play()
+    playerInstance.src(newUrl)
+    playerInstance.load()
+    playerInstance.play()
   }
 }
 
@@ -328,12 +323,12 @@ onBeforeUnmount(() => {
     playerContainer.value.removeEventListener('mouseup', onMouseUp)
     playerContainer.value.removeEventListener('mouseleave', onMouseLeave)
   }
-  if (player) {
-    player.dispose()
+  if (playerInstance) {
+    playerInstance.dispose()
   }
 })
 
-// 分辨率按钮鼠标效果
+// 分辨率按钮效果
 const onResolutionMouseEnter = () => { resolutionBtnHovered.value = true }
 const onResolutionMouseLeave = () => { resolutionBtnHovered.value = false }
 const onResolutionMouseDown = () => {
